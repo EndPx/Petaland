@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+.yarn/
+
+# Build output
+dist/
+build/
+target/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Anchor
+programs/target/
+.anchor/
+
+# Colyseus
+server/.colyseus/
+
+# Temp
+*.tmp
+*.log
+
+# Sensitive
+*.pem
+*.key
+
+# Claude/Agent configs (local only)
+.agents/
+.claude/
+.kiro/
+.omc/
+skills-lock.json
+
+# Game design docs (local only)
+GAME_DESIGN.md
+*.md
+!README.md
+!client/public/assets/PIXEL_ART_STYLE_GUIDE.md
