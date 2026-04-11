@@ -1,6 +1,6 @@
 import { PlayerSchema } from "../schema/PlayerSchema";
 import { addToInventory, removeFromInventory, countInventory } from "../schema/InventorySchema";
-import { getItem } from "../data/items";
+import { getItem, ITEMS } from "../data/items";
 import { getBlueprint, getShopBlueprints } from "../data/blueprints";
 import { CraftingSystem } from "./CraftingSystem";
 import { NPCPriceEntry } from "../types";
@@ -26,11 +26,10 @@ export class NPCShop {
 
   private initializePriceTable(): void {
     // Pre-populate with all sellable items
-    const items = require("../data/items").ITEMS as Record<string, any>;
-    for (const itemId of Object.keys(items)) {
+    for (const itemId of Object.keys(ITEMS)) {
       this.priceTable.set(itemId, {
         itemId,
-        basePrice: items[itemId].sellPrice,
+        basePrice: ITEMS[itemId].sellPrice,
         sellCount: 0,
         lastDecayTime: Date.now(),
       });
@@ -222,10 +221,9 @@ export class NPCShop {
     buyPrice: number;
     type: string;
   }> {
-    const items = require("../data/items").ITEMS as Record<string, any>;
-    return Object.values(items)
-      .filter((item: any) => item.buyPrice !== undefined && item.buyPrice > 0)
-      .map((item: any) => ({
+    return Object.values(ITEMS)
+      .filter((item) => item.buyPrice !== undefined && item.buyPrice > 0)
+      .map((item) => ({
         itemId: item.id,
         buyPrice: item.buyPrice as number,
         type: item.type as string,
