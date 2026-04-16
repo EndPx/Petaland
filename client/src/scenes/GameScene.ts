@@ -3,14 +3,16 @@ import { Player } from '../game/Player';
 import { WorldMap } from '../game/WorldMap';
 import { Camera } from '../game/Camera';
 import { HUD } from '../ui/HUD';
-import { TILE_SIZE, WORLD_WIDTH_TILES, WORLD_HEIGHT_TILES } from '../config';
 import { GAME_EVENTS } from '../types/index';
 
 /**
  * GameScene — main scene: world map, player, camera, HUD.
  *
+ * Movement is grid-based (tile-to-tile with tweening, no physics).
+ * Walkability is checked via WorldMap.isWalkable() before each move.
+ *
  * Controls:
- *   WASD / Arrow keys — move player
+ *   WASD / Arrow keys — move player (grid-based)
  *   Scroll wheel / +/- — zoom camera
  *   I — toggle inventory
  */
@@ -20,7 +22,6 @@ export class GameScene extends Phaser.Scene {
   private gameCamera!: Camera;
   private hud!: HUD;
 
-  private staticObjects!: Phaser.Physics.Arcade.StaticGroup;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: {
     W: Phaser.Input.Keyboard.Key;
@@ -44,32 +45,14 @@ export class GameScene extends Phaser.Scene {
     this.worldMap = new WorldMap(this, 12345);
     this.worldMap.generate();
 
-    // 2. Set world physics bounds
-    this.physics.world.setBounds(
-      0,
-      0,
-      this.worldMap.getWorldWidth(),
-      this.worldMap.getWorldHeight(),
-    );
+    // 2. Spawn player at farm center (grid-based — tile coordinates)
+    const farmCenter = this.worldMap.getFarmCenter();
+    this.player = new Player(this, farmCenter.tx, farmCenter.ty, 'farmer_male');
 
-    // 3. Enable physics on world objects
-    this.staticObjects = this.worldMap.enablePhysics(this.physics);
+    // 3. Wire walkability check (grid movement uses this instead of physics)
+    this.player.setWalkableCheck((tx, ty) => this.worldMap.isWalkable(tx, ty));
 
-    // 4. Spawn player at starting tile (spawn near village center)
-    const spawnTileX = 30;
-    const spawnTileY = 30;
-    const spawnX = spawnTileX * TILE_SIZE + TILE_SIZE / 2;
-    const spawnY = spawnTileY * TILE_SIZE + TILE_SIZE / 2;
-
-    this.player = new Player(this, spawnX, spawnY, 'farmer_male');
-
-    // 5. Setup collisions: player vs static world objects
-    this.physics.add.collider(
-      this.player as unknown as Phaser.Physics.Arcade.Sprite,
-      this.staticObjects,
-    );
-
-    // 6. Setup input
+    // 4. Setup input
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = {
       W: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W),
@@ -83,7 +66,7 @@ export class GameScene extends Phaser.Scene {
     this.debugKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.F1);
     this.player.setupInput(this.cursors, this.wasd);
 
-    // 7. Setup camera
+    // 5. Setup camera (follows player sprite, bounded to world)
     this.gameCamera = new Camera(this);
     this.gameCamera.follow(
       this.player,
@@ -92,7 +75,7 @@ export class GameScene extends Phaser.Scene {
     );
     this.gameCamera.fadeIn(600);
 
-    // 8. Setup HUD (DOM overlay)
+    // 6. Setup HUD (DOM overlay)
     this.hud = new HUD(this.game, {
       energy: 100,
       maxEnergy: 100,
@@ -120,7 +103,7 @@ export class GameScene extends Phaser.Scene {
       },
     );
 
-    // 9. Debug overlay
+    // 7. Debug overlay
     this.debugText = this.add
       .text(8, 8, '', {
         fontSize: '10px',
@@ -133,10 +116,10 @@ export class GameScene extends Phaser.Scene {
       .setDepth(100)
       .setVisible(false);
 
-    // 10. Add control hints (fixed to camera)
+    // 8. Add control hints (fixed to camera)
     this.addControlHints();
 
-    // 11. Emit scene ready
+    // 9. Emit scene ready
     this.game.events.emit(GAME_EVENTS.SCENE_READY, { scene: 'GameScene' });
 
     // Give the player some starting currency for demo
@@ -166,10 +149,9 @@ export class GameScene extends Phaser.Scene {
 
     // Update debug text
     if (this.showDebug) {
-      const { tx, ty } = this.worldMap.worldToTile(this.player.x, this.player.y);
       this.debugText.setText([
+        `Tile:  (${this.player.getTileX()}, ${this.player.getTileY()})`,
         `World: (${Math.round(this.player.x)}, ${Math.round(this.player.y)})`,
-        `Tile:  (${tx}, ${ty})`,
         `Dir:   ${this.player.getDirection()}`,
         `Moving:${this.player.getIsMoving()}`,
         `Zoom:  ${this.gameCamera.getZoom()}x`,

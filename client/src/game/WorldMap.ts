@@ -3,14 +3,19 @@ import { TileType } from '../types/index';
 import { TILE_SIZE, WORLD_WIDTH_TILES, WORLD_HEIGHT_TILES } from '../config';
 
 /**
- * WorldMap — renders the tile-based world from a hand-authored biome layout.
+ * WorldMap — NomStead-style homestead layout.
  *
- * Design principles (learned the hard way after trying random Wang indices):
- *   1. One clean "center" Wang tile (index 15) per biome → no visual chaos
- *   2. Biome zones are hand-designed rectangles → coherent layout
- *   3. Variation comes from sparse, deterministic accent tiles, not randomness
- *   4. Objects are placed in organized clusters (farm plots in rows, village
- *      buildings aligned, forests as solid patches)
+ * The map is a small, focused world (32x32 tiles) with:
+ *   1. Grass base everywhere
+ *   2. Central farm area: 8x8 grid of soil plots
+ *   3. Stone border around the farm (octagonal shape)
+ *   4. Entrance gap at the bottom of the border
+ *   5. Scattered trees, bushes, and flowers in the grass
+ *   6. A small pond in the NE corner
+ *   7. Forest patches in corners
+ *
+ * The player starts inside the farm area and can walk out
+ * through the entrance to explore the surroundings.
  */
 export class WorldMap {
   private scene: Phaser.Scene;
@@ -18,16 +23,18 @@ export class WorldMap {
   private objectLayer: Phaser.GameObjects.Group;
   private collisionObjects: Phaser.GameObjects.Image[] = [];
 
-  // The biome grid — every cell is a TileType
   private biomes: TileType[][] = [];
+
+  // Farm area bounds (tile coords)
+  private readonly farmX = 12;  // farm left edge
+  private readonly farmY = 10;  // farm top edge
+  private readonly farmW = 8;   // farm width in tiles
+  private readonly farmH = 8;   // farm height in tiles
 
   constructor(scene: Phaser.Scene, _seed = 42) {
     this.scene = scene;
     this.tileLayer = scene.add.group();
     this.objectLayer = scene.add.group();
-    // Build the biome grid eagerly so walkability queries work before generate().
-    // Rendering Phaser images still happens in generate() to allow
-    // construction in tests without a full Phaser runtime.
     this.buildBiomeGrid();
   }
 
@@ -39,13 +46,12 @@ export class WorldMap {
   }
 
   /**
-   * Build the biome grid by hand-designing zones:
-   *   - Grass base (the whole map)
-   *   - Central village plaza (grass)
-   *   - Forest in NE and SW corners
-   *   - Stone mountain range across the N
-   *   - River flowing S→N through the middle
-   *   - Small lake in the E
+   * Build NomStead-style biome grid:
+   *   - Grass everywhere
+   *   - Stone border ring around farm area
+   *   - Farm soil inside the border
+   *   - Small pond in NE
+   *   - Forest patches at corners
    */
   private buildBiomeGrid(): void {
     // 1. Fill everything with grass
@@ -56,29 +62,55 @@ export class WorldMap {
       }
     }
 
-    // 2. Stone mountain range across the top (y=0-5)
-    this.fillRect(0, 0, WORLD_WIDTH_TILES, 5, TileType.Stone);
+    // 2. Stone border ring around farm (1 tile thick, octagonal)
+    const bx = this.farmX - 1;
+    const by = this.farmY - 1;
+    const bw = this.farmW + 2;
+    const bh = this.farmH + 2;
 
-    // 3. Forest in NE corner (top-right)
-    this.fillRect(48, 6, 16, 10, TileType.Forest);
+    // Top and bottom edges (skip corners for octagonal)
+    for (let tx = bx + 1; tx < bx + bw - 1; tx++) {
+      this.setBiome(tx, by, TileType.Stone);      // top
+      this.setBiome(tx, by + bh - 1, TileType.Stone); // bottom
+    }
+    // Left and right edges
+    for (let ty = by + 1; ty < by + bh - 1; ty++) {
+      this.setBiome(bx, ty, TileType.Stone);       // left
+      this.setBiome(bx + bw - 1, ty, TileType.Stone); // right
+    }
+    // Corner pieces (octagonal bevel)
+    this.setBiome(bx + 1, by, TileType.Stone);
+    this.setBiome(bx, by + 1, TileType.Stone);
+    this.setBiome(bx + bw - 2, by, TileType.Stone);
+    this.setBiome(bx + bw - 1, by + 1, TileType.Stone);
+    this.setBiome(bx, by + bh - 2, TileType.Stone);
+    this.setBiome(bx + 1, by + bh - 1, TileType.Stone);
+    this.setBiome(bx + bw - 2, by + bh - 1, TileType.Stone);
+    this.setBiome(bx + bw - 1, by + bh - 2, TileType.Stone);
 
-    // 4. Forest in SW corner (bottom-left)
-    this.fillRect(0, 48, 18, 16, TileType.Forest);
+    // 3. Entrance gap at bottom center of border (2 tiles wide)
+    const entranceTX = this.farmX + Math.floor(this.farmW / 2) - 1;
+    this.setBiome(entranceTX, by + bh - 1, TileType.Grass);
+    this.setBiome(entranceTX + 1, by + bh - 1, TileType.Grass);
 
-    // 5. Forest patch in SE (bottom-right)
-    this.fillRect(46, 50, 18, 14, TileType.Forest);
+    // 4. Small pond in NE corner
+    this.fillEllipse(26, 5, 3, 2, TileType.Water);
 
-    // 6. River — vertical stream flowing S→N through tx=10-12
-    this.fillRect(10, 8, 3, 40, TileType.Water);
+    // 5. Forest patches at map corners
+    this.fillRect(0, 0, 4, 4, TileType.Forest);
+    this.fillRect(28, 0, 4, 4, TileType.Forest);
+    this.fillRect(0, 28, 4, 4, TileType.Forest);
+    this.fillRect(28, 28, 4, 4, TileType.Forest);
 
-    // 7. Small lake in the east (centered around tx=44, ty=28)
-    this.fillEllipse(44, 28, 5, 4, TileType.Water);
+    // 6. Small stone outcrops
+    this.fillRect(6, 2, 2, 2, TileType.Stone);
+    this.fillRect(24, 26, 2, 2, TileType.Stone);
+  }
 
-    // 8. Stone patch around mountain base (row 5-6, scattered)
-    this.fillRect(20, 5, 6, 2, TileType.Stone);
-    this.fillRect(38, 5, 8, 2, TileType.Stone);
-
-    // NOTE: spawn/village area (tx=28-36, ty=24-32) stays as grass
+  private setBiome(tx: number, ty: number, tile: TileType): void {
+    if (tx >= 0 && ty >= 0 && tx < WORLD_WIDTH_TILES && ty < WORLD_HEIGHT_TILES) {
+      this.biomes[ty][tx] = tile;
+    }
   }
 
   private fillRect(x: number, y: number, w: number, h: number, tile: TileType): void {
@@ -100,13 +132,15 @@ export class WorldMap {
     }
   }
 
+  // ── Rendering ──────────────────────────────────────────────────────────────
+
   private renderTiles(): void {
     for (let ty = 0; ty < WORLD_HEIGHT_TILES; ty++) {
       for (let tx = 0; tx < WORLD_WIDTH_TILES; tx++) {
         const wx = tx * TILE_SIZE + TILE_SIZE / 2;
         const wy = ty * TILE_SIZE + TILE_SIZE / 2;
         const tileType = this.biomes[ty][tx];
-        const wangIndex = this.pickTileIndex(tx, ty, tileType);
+        const wangIndex = this.pickTileIndex(tx, ty);
         const key = `${tileType}_wang_${wangIndex}`;
 
         const img = this.scene.add.image(wx, wy, key).setDepth(0);
@@ -116,93 +150,75 @@ export class WorldMap {
   }
 
   /**
-   * Pick the Wang tile index.
-   *
-   * The tileset spritesheet (see public/assets/tilesets/generate_tilesets.py)
-   * arranges tiles as 4 rows × 4 cols = 16 tiles:
-   *   - Indices 0–3  : BASE variants A/B/C/D (clean center terrain — what we want!)
-   *   - Indices 4–7  : Transition edges to upper palette (half-and-half)
-   *   - Indices 8–11 : Outer corners (3/4 lower + 1/4 upper)
-   *   - Indices 12–15: Inner corners (3/4 upper + 1/4 lower — mostly dirt/sand)
-   *
-   * Previously this used index 15 thinking it was a "fully-surrounded center
-   * tile" (the Wang-16 convention from other systems).  That was wrong for
-   * THIS tileset — index 15 is an inner-corner tile showing the *upper*
-   * palette (dirt for grass, sand for water, gravel for stone).  Rendering
-   * index 15 everywhere made the map look like chaotic dirt/sand/moss
-   * noise instead of a coherent terrain.  Fix: use indices 0–3 (base variants)
-   * and rotate through them deterministically for subtle organic variation.
+   * Pick clean base variant (indices 0-3) using deterministic hash.
    */
-  private pickTileIndex(tx: number, ty: number, _type: TileType): number {
+  private pickTileIndex(tx: number, ty: number): number {
     const h = ((tx * 73856093) ^ (ty * 19349663)) >>> 0;
-    // Deterministically pick one of the 4 clean base variants (0, 1, 2, 3).
-    // This gives the terrain organic variation without introducing any
-    // transition/corner tiles that would bleed upper-palette colors in.
     return h % 4;
   }
 
   // ── Object Placement ─────────────────────────────────────────────────────────
 
   private placeObjects(): void {
-    // ── Forest NE: dense pine cluster ──
-    this.placePatchObjects('pine_tree', 48, 6, 16, 10, 18, true);
-    // ── Forest SW: oak + pine mix ──
-    this.placePatchObjects('oak_tree', 1, 48, 16, 14, 20, true);
-    this.placePatchObjects('pine_tree', 1, 48, 16, 14, 10, true);
-    // ── Forest SE ──
-    this.placePatchObjects('pine_tree', 46, 50, 18, 14, 22, true);
+    // ── Farm soil beds (8x8 grid inside the border) ──
+    for (let row = 0; row < this.farmH; row++) {
+      for (let col = 0; col < this.farmW; col++) {
+        this.placeObject('soil_bed', this.farmX + col, this.farmY + row, false);
+      }
+    }
 
-    // ── Scattered oaks in open grassland (away from village) ──
-    this.placePatchObjects('oak_tree', 38, 10, 10, 12, 8, true);
-    this.placePatchObjects('oak_tree', 18, 35, 10, 10, 6, true);
+    // ── Village structures near farm entrance ──
+    this.placeObject('workbench', this.farmX - 3, this.farmY + 2, true);
+    this.placeObject('bonfire', this.farmX - 3, this.farmY + 5, true);
+    this.placeObject('well', this.farmX + this.farmW + 2, this.farmY + 3, true);
+    this.placeObject('storage_box', this.farmX + this.farmW + 2, this.farmY + 6, true);
+    this.placeObject('npc_shop_stall', 16, 22, true);
 
-    // ── Rocks near mountains & scattered ──
-    this.placePatchObjects('rock_small', 20, 6, 20, 3, 15, true);
-    this.placePatchObjects('rock_small', 38, 6, 20, 3, 15, true);
+    // ── Trees in forest corners ──
+    this.placePatchObjects('pine_tree', 0, 0, 4, 4, 4, true);
+    this.placePatchObjects('pine_tree', 28, 0, 4, 4, 4, true);
+    this.placePatchObjects('oak_tree', 0, 28, 4, 4, 4, true);
+    this.placePatchObjects('pine_tree', 28, 28, 4, 4, 4, true);
 
-    // ── Wild carrots (gatherable, grass area near village) ──
+    // ── Scattered oaks in grassland ──
+    const treeSpots: [number, number][] = [
+      [5, 8], [8, 5], [24, 8], [26, 14],
+      [5, 24], [8, 26], [24, 24], [3, 16],
+    ];
+    for (const [tx, ty] of treeSpots) {
+      this.placeObject('oak_tree', tx, ty, true);
+    }
+
+    // ── Scattered rocks ──
+    const rockSpots: [number, number][] = [
+      [7, 3], [25, 27], [3, 20], [27, 12],
+    ];
+    for (const [tx, ty] of rockSpots) {
+      this.placeObject('rock_small', tx, ty, true);
+    }
+
+    // ── Wild carrots near farm ──
     const carrotSpots: [number, number][] = [
-      [22, 20], [25, 22], [38, 22], [40, 25],
-      [24, 34], [38, 35], [20, 40], [42, 38],
+      [9, 12], [9, 15], [22, 13], [22, 16],
     ];
     for (const [tx, ty] of carrotSpots) {
       this.placeObject('wild_carrot', tx, ty, false);
     }
 
-    // ── Flower petals (decorative, scattered in grass) ──
+    // ── Flower petals scattered ──
     const flowerSpots: [number, number][] = [
-      [20, 25], [26, 24], [36, 28], [40, 30],
-      [22, 36], [30, 36], [38, 34], [18, 30],
+      [6, 10], [10, 22], [22, 8], [25, 20],
+      [8, 18], [14, 24], [20, 24], [4, 14],
     ];
     for (const [tx, ty] of flowerSpots) {
       this.placeObject('flower_petal', tx, ty, false);
     }
 
-    // ── Bushes along forest edges ──
-    this.placeObject('bush', 17, 50, false);
-    this.placeObject('bush', 17, 54, false);
-    this.placeObject('bush', 45, 52, false);
-    this.placeObject('bush', 47, 18, false);
-
-    // ── Village plaza (centered at tx=32, ty=28) ──
-    this.placeObject('npc_shop_stall', 30, 26, true);
-    this.placeObject('workbench', 34, 26, true);
-    this.placeObject('well', 32, 30, true);
-    this.placeObject('bonfire', 32, 27, true);
-    this.placeObject('storage_box', 28, 30, true);
-
-    // ── Fence along the north edge of village ──
-    for (let tx = 26; tx <= 38; tx++) {
-      if (tx === 32) continue; // leave a gap for the entrance
-      this.placeObject('fence_horizontal', tx, 24, true);
-    }
-
-    // ── Soil beds ready for planting (organized rows) ──
-    for (let row = 0; row < 3; row++) {
-      for (let col = 0; col < 4; col++) {
-        this.placeObject('soil_bed', 38 + col * 2, 32 + row * 2, false);
-      }
-    }
+    // ── Bushes along paths ──
+    this.placeObject('bush', 14, 21, false);
+    this.placeObject('bush', 18, 21, false);
+    this.placeObject('bush', 10, 8, false);
+    this.placeObject('bush', 22, 8, false);
   }
 
   private placePatchObjects(
@@ -214,7 +230,6 @@ export class WorldMap {
     count: number,
     solid: boolean,
   ): void {
-    // Deterministic Halton-like distribution — no two objects on the same tile
     const placed = new Set<string>();
     let attempts = 0;
     let i = 0;
@@ -242,7 +257,7 @@ export class WorldMap {
 
     const img = this.scene.add
       .image(wx, wy, key)
-      .setDepth(wy) // depth-sort by Y so objects overlap correctly
+      .setDepth(wy)
       .setOrigin(0.5, 0.85);
 
     this.objectLayer.add(img);
@@ -278,6 +293,15 @@ export class WorldMap {
     return WORLD_HEIGHT_TILES * TILE_SIZE;
   }
 
+  // ── Farm Area Info ────────────────────────────────────────────────────────────
+
+  getFarmCenter(): { tx: number; ty: number } {
+    return {
+      tx: this.farmX + Math.floor(this.farmW / 2),
+      ty: this.farmY + Math.floor(this.farmH / 2),
+    };
+  }
+
   // ── Utility ──────────────────────────────────────────────────────────────────
 
   worldToTile(wx: number, wy: number): { tx: number; ty: number } {
@@ -299,6 +323,7 @@ export class WorldMap {
       return false;
     }
     const type = this.biomes[ty]?.[tx];
-    return type !== TileType.Water;
+    // Water and stone border are not walkable
+    return type !== TileType.Water && type !== TileType.Stone;
   }
 }

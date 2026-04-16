@@ -1,26 +1,22 @@
 /**
- * Player.test.ts — RED phase tests for Player logic and state.
+ * Player.test.ts — tests for grid-based Player logic and state.
  *
- * Phaser requires a live canvas/WebGL context, so we mock the entire Phaser
- * module.  We then test only the pure logic portions of Player:
- *   - Initial state values
+ * Player extends Phaser.GameObjects.Sprite (no physics).
+ * Movement is tile-to-tile via tweens, walkability checked externally.
+ *
+ * We mock Phaser so we can instantiate Player without a canvas and test:
+ *   - Initial state values (tile-based constructor)
  *   - setEnergy / setSilver / setPetal clamping/flooring
  *   - setWalletAddress
  *   - setTilePosition pixel conversion
+ *   - getTileX / getTileY accessors
  *   - getDirection / getIsMoving initial state
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Phaser mock ───────────────────────────────────────────────────────────────
-// We need a minimal Phaser stub so Player.ts can be imported without a browser.
-
-const mockBody = {
-  setCollideWorldBounds: vi.fn(),
-  setSize: vi.fn(),
-  setOffset: vi.fn(),
-  setVelocity: vi.fn(),
-};
+// Player extends Phaser.GameObjects.Sprite (no physics).
 
 const mockGameEvents = {
   emit: vi.fn(),
@@ -34,11 +30,6 @@ const mockScene = {
   add: {
     existing: vi.fn(),
   },
-  physics: {
-    add: {
-      existing: vi.fn(),
-    },
-  },
   game: mockGame,
 };
 
@@ -46,13 +37,11 @@ vi.mock('phaser', () => {
   class MockSprite {
     x: number;
     y: number;
-    body: typeof mockBody;
     scene: typeof mockScene;
 
     constructor(scene: typeof mockScene, x: number, y: number, _texture: string) {
       this.x = x;
       this.y = y;
-      this.body = mockBody;
       this.scene = scene;
     }
 
@@ -67,10 +56,8 @@ vi.mock('phaser', () => {
 
   return {
     default: {
-      Physics: {
-        Arcade: {
-          Sprite: MockSprite,
-        },
+      GameObjects: {
+        Sprite: MockSprite,
       },
       Math: {
         Clamp: (value: number, min: number, max: number) =>
@@ -93,17 +80,19 @@ import { GAME_EVENTS } from '../types/index';
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe('Player — initial state', () => {
+describe('Player — initial state (tile-based constructor)', () => {
   let player: Player;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    player = new Player(mockScene as never, 100, 200);
+    // Constructor: (scene, tileX, tileY, character)
+    // tileX=5, tileY=10 → pixel: (5*16+8, 10*16+8) = (88, 168)
+    player = new Player(mockScene as never, 5, 10);
   });
 
-  it('sets initial x and y from constructor args', () => {
-    expect(player.playerData.x).toBe(100);
-    expect(player.playerData.y).toBe(200);
+  it('sets initial pixel position from tile coords', () => {
+    expect(player.playerData.x).toBe(5 * TILE_SIZE + TILE_SIZE / 2);
+    expect(player.playerData.y).toBe(10 * TILE_SIZE + TILE_SIZE / 2);
   });
 
   it('starts facing south', () => {
@@ -145,6 +134,29 @@ describe('Player — initial state', () => {
   it('accepts farmer_female character', () => {
     const female = new Player(mockScene as never, 0, 0, 'farmer_female');
     expect(female.playerData.character).toBe('farmer_female');
+  });
+});
+
+describe('Player — tile accessors', () => {
+  let player: Player;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    player = new Player(mockScene as never, 5, 10);
+  });
+
+  it('getTileX returns initial tileX', () => {
+    expect(player.getTileX()).toBe(5);
+  });
+
+  it('getTileY returns initial tileY', () => {
+    expect(player.getTileY()).toBe(10);
+  });
+
+  it('tile (0,0) gives pixel center (8,8)', () => {
+    const p = new Player(mockScene as never, 0, 0);
+    expect(p.x).toBe(TILE_SIZE / 2);
+    expect(p.y).toBe(TILE_SIZE / 2);
   });
 });
 
@@ -291,33 +303,33 @@ describe('Player — setTilePosition()', () => {
     player = new Player(mockScene as never, 0, 0);
   });
 
-  it('converts tile (0, 0) to pixel center of first tile', () => {
-    player.setTilePosition(0, 0, TILE_SIZE);
+  it('teleports to tile (0, 0) — pixel center of first tile', () => {
+    player.setTilePosition(0, 0);
     expect(player.x).toBe(TILE_SIZE / 2);
     expect(player.y).toBe(TILE_SIZE / 2);
   });
 
-  it('converts tile (1, 1) to correct pixel coords', () => {
-    player.setTilePosition(1, 1, TILE_SIZE);
+  it('teleports to tile (1, 1) — correct pixel coords', () => {
+    player.setTilePosition(1, 1);
     expect(player.x).toBe(TILE_SIZE + TILE_SIZE / 2);
     expect(player.y).toBe(TILE_SIZE + TILE_SIZE / 2);
   });
 
-  it('converts tile (5, 3) to correct pixel coords', () => {
-    player.setTilePosition(5, 3, TILE_SIZE);
+  it('teleports to tile (5, 3) — correct pixel coords', () => {
+    player.setTilePosition(5, 3);
     expect(player.x).toBe(5 * TILE_SIZE + TILE_SIZE / 2);
     expect(player.y).toBe(3 * TILE_SIZE + TILE_SIZE / 2);
   });
 
-  it('works with arbitrary tile sizes', () => {
-    player.setTilePosition(2, 4, 32);
-    expect(player.x).toBe(2 * 32 + 16);
-    expect(player.y).toBe(4 * 32 + 16);
+  it('updates getTileX and getTileY after teleport', () => {
+    player.setTilePosition(12, 8);
+    expect(player.getTileX()).toBe(12);
+    expect(player.getTileY()).toBe(8);
   });
 });
 
 describe('Player — PLAYER_SPEED constant', () => {
-  it('PLAYER_SPEED is 120 pixels per second', () => {
+  it('PLAYER_SPEED is 120 pixels per second (legacy)', () => {
     expect(PLAYER_SPEED).toBe(120);
   });
 });

@@ -4,7 +4,7 @@ import {
   PlayerState,
   GAME_EVENTS,
 } from '../types/index';
-import { PLAYER_SPEED, WALK_FRAME_RATE, TILE_SIZE } from '../config';
+import { TILE_SIZE, WALK_FRAME_RATE } from '../config';
 
 type CursorKeys = Phaser.Types.Input.Keyboard.CursorKeys;
 
@@ -15,44 +15,66 @@ interface WASDKeys {
   D: Phaser.Input.Keyboard.Key;
 }
 
+/** Callback that checks if a tile coordinate is walkable */
+type WalkableCheck = (tx: number, ty: number) => boolean;
+
 /**
- * Player — Phaser arcade physics sprite with 4-direction movement and
- * walk animation using individual frame images (no spritesheet needed).
+ * Player — NomStead-style grid-based movement.
  *
- * NOTE: We avoid naming our property 'state' because Phaser.GameObjects.Sprite
- * already declares `state: string | number`.  We use `playerData` instead.
+ * Movement is tile-to-tile with smooth tweening:
+ *   - Press WASD/Arrows → check if target tile is walkable
+ *   - If walkable, tween smoothly to the target tile center
+ *   - Can't move again until current tween completes
+ *   - Facing direction updates instantly on key press
+ *
+ * No physics needed — walkability is checked via WorldMap.isWalkable()
+ * before each move, so the player never overlaps solid objects.
  */
-export class Player extends Phaser.Physics.Arcade.Sprite {
+export class Player extends Phaser.GameObjects.Sprite {
   private direction: Direction = 'south';
   private isMoving = false;
   private walkFrame = 0;
   private walkFrameTimer = 0;
-  private readonly frameDuration: number; // ms per walk frame
+  private readonly frameDuration: number;
   private character: 'farmer_male' | 'farmer_female';
 
-  // Input references (set from GameScene)
+  /** Duration (ms) to tween one tile */
+  private readonly moveDuration = 180;
+
+  /** Current tile position */
+  private tileX: number;
+  private tileY: number;
+
+  /** Walkability checker (provided by GameScene from WorldMap) */
+  private canWalk: WalkableCheck = () => true;
+
+  // Input references
   private cursors: CursorKeys | null = null;
   private wasd: WASDKeys | null = null;
 
-  // Player data exposed to network layer (renamed from 'state' to avoid Phaser conflict)
+  // Player data exposed to network layer
   public playerData: PlayerState;
 
   constructor(
     scene: Phaser.Scene,
-    x: number,
-    y: number,
+    tileX: number,
+    tileY: number,
     character: 'farmer_male' | 'farmer_female' = 'farmer_male',
   ) {
-    super(scene, x, y, `${character}_south`);
+    const wx = tileX * TILE_SIZE + TILE_SIZE / 2;
+    const wy = tileY * TILE_SIZE + TILE_SIZE / 2;
+    super(scene, wx, wy, `${character}_south`);
 
     this.character = character;
+    this.tileX = tileX;
+    this.tileY = tileY;
     this.frameDuration = 1000 / WALK_FRAME_RATE;
 
     this.playerData = {
       id: 'local',
       walletAddress: '',
-      x,
-      y,
+      x: wx,
+      y: wy,
       direction: 'south',
       isMoving: false,
       energy: 100,
@@ -64,28 +86,22 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       character,
     };
 
-    // Add to scene + physics
-    scene.add.existing(this as unknown as Phaser.GameObjects.GameObject);
-    scene.physics.add.existing(this as unknown as Phaser.GameObjects.GameObject);
-
-    const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setCollideWorldBounds(true);
-    // Narrow hitbox — align to bottom of sprite for top-down feel
-    body.setSize(TILE_SIZE * 0.7, TILE_SIZE * 0.5);
-    body.setOffset(TILE_SIZE * 0.15, TILE_SIZE * 0.5);
-
+    // Add to scene (no physics — grid movement handles collisions)
+    scene.add.existing(this);
     this.setDepth(5);
     this.setOrigin(0.5, 0.75);
   }
 
   // ── Input Setup ─────────────────────────────────────────────────────────────
 
-  setupInput(
-    cursors: CursorKeys,
-    wasd: WASDKeys,
-  ): void {
+  setupInput(cursors: CursorKeys, wasd: WASDKeys): void {
     this.cursors = cursors;
     this.wasd = wasd;
+  }
+
+  /** Provide a walkability checker (from WorldMap.isWalkable) */
+  setWalkableCheck(check: WalkableCheck): void {
+    this.canWalk = check;
   }
 
   // ── Update (called every frame from GameScene) ───────────────────────────────
@@ -96,56 +112,67 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.syncPlayerData();
   }
 
-  // ── Movement ─────────────────────────────────────────────────────────────────
+  // ── Grid-Based Movement ─────────────────────────────────────────────────────
 
   private handleMovement(): void {
     if (!this.cursors && !this.wasd) return;
+    // Can't start a new move while already tweening
+    if (this.isMoving) return;
 
-    const body = this.body as Phaser.Physics.Arcade.Body;
-    let vx = 0;
-    let vy = 0;
+    const left = this.cursors?.left.isDown || this.wasd?.A.isDown;
+    const right = this.cursors?.right.isDown || this.wasd?.D.isDown;
+    const up = this.cursors?.up.isDown || this.wasd?.W.isDown;
+    const down = this.cursors?.down.isDown || this.wasd?.S.isDown;
 
-    const left =
-      this.cursors?.left.isDown || this.wasd?.A.isDown;
-    const right =
-      this.cursors?.right.isDown || this.wasd?.D.isDown;
-    const up =
-      this.cursors?.up.isDown || this.wasd?.W.isDown;
-    const down =
-      this.cursors?.down.isDown || this.wasd?.S.isDown;
+    let dx = 0;
+    let dy = 0;
 
-    if (left) {
-      vx = -PLAYER_SPEED;
+    // Priority: vertical then horizontal (no diagonal in grid movement)
+    if (up) {
+      dy = -1;
+      this.direction = 'north';
+    } else if (down) {
+      dy = 1;
+      this.direction = 'south';
+    } else if (left) {
+      dx = -1;
       this.direction = 'west';
     } else if (right) {
-      vx = PLAYER_SPEED;
+      dx = 1;
       this.direction = 'east';
     }
 
-    if (up) {
-      vy = -PLAYER_SPEED;
-      this.direction = 'north';
-    } else if (down) {
-      vy = PLAYER_SPEED;
-      this.direction = 'south';
-    }
+    if (dx === 0 && dy === 0) return;
 
-    // Normalize diagonal movement
-    if (vx !== 0 && vy !== 0) {
-      const factor = 1 / Math.SQRT2;
-      vx *= factor;
-      vy *= factor;
-    }
+    const targetTX = this.tileX + dx;
+    const targetTY = this.tileY + dy;
 
-    body.setVelocity(vx, vy);
-    this.isMoving = vx !== 0 || vy !== 0;
+    // Check if target tile is walkable
+    if (!this.canWalk(targetTX, targetTY)) return;
+
+    // Start smooth tween to target tile
+    this.isMoving = true;
+    const targetWX = targetTX * TILE_SIZE + TILE_SIZE / 2;
+    const targetWY = targetTY * TILE_SIZE + TILE_SIZE / 2;
+
+    this.scene.tweens.add({
+      targets: this,
+      x: targetWX,
+      y: targetWY,
+      duration: this.moveDuration,
+      ease: 'Power2',
+      onComplete: () => {
+        this.tileX = targetTX;
+        this.tileY = targetTY;
+        this.isMoving = false;
+      },
+    });
   }
 
   // ── Animation (manual frame cycling with individual images) ──────────────────
 
   private updateAnimation(delta: number): void {
     if (!this.isMoving) {
-      // Show idle directional sprite
       this.setTexture(`${this.character}_${this.direction}`);
       this.walkFrame = 0;
       this.walkFrameTimer = 0;
@@ -155,7 +182,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.walkFrameTimer += delta;
     if (this.walkFrameTimer >= this.frameDuration) {
       this.walkFrameTimer -= this.frameDuration;
-      this.walkFrame = (this.walkFrame + 1) % 9; // f0–f8
+      this.walkFrame = (this.walkFrame + 1) % 6; // f0–f5 (PixelLab walk cycle)
     }
 
     this.setTexture(
@@ -180,6 +207,14 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
   getIsMoving(): boolean {
     return this.isMoving;
+  }
+
+  getTileX(): number {
+    return this.tileX;
+  }
+
+  getTileY(): number {
+    return this.tileY;
   }
 
   setEnergy(energy: number): void {
@@ -209,10 +244,12 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   /** Teleport player to tile coordinates */
-  setTilePosition(tileX: number, tileY: number, tileSize: number): void {
+  setTilePosition(tx: number, ty: number): void {
+    this.tileX = tx;
+    this.tileY = ty;
     this.setPosition(
-      tileX * tileSize + tileSize / 2,
-      tileY * tileSize + tileSize / 2,
+      tx * TILE_SIZE + TILE_SIZE / 2,
+      ty * TILE_SIZE + TILE_SIZE / 2,
     );
   }
 }

@@ -65,8 +65,8 @@ export class BootScene extends Phaser.Scene {
           `${char}_${dir}`,
           `assets/characters/${char}_${dir}.png`,
         );
-        // Walk animation frames f0–f8
-        for (let f = 0; f <= 8; f++) {
+        // Walk animation frames f0–f5 (6-frame PixelLab walk cycle)
+        for (let f = 0; f <= 5; f++) {
           this.load.image(
             `${char}_walk_${dir}_f${f}`,
             `assets/characters/${char}_walk_${dir}_f${f}.png`,
