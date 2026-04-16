@@ -162,27 +162,28 @@ describe('WorldMap — isWalkable()', () => {
     expect(map.isWalkable(0, WORLD_HEIGHT_TILES)).toBe(false);
   });
 
-  it('returns false for water tile at (21, 15) — known water region (tx 20-22, ty 10-39)', () => {
-    // River runs tx > 20 && tx < 23 && ty > 10 && ty < 40
-    expect(map.isWalkable(21, 15)).toBe(false);
+  it('returns false for water tile at (11, 15) — known river region (tx 10-12, ty 8-47)', () => {
+    // Hand-authored river runs fillRect(10, 8, 3, 40) => tx ∈ [10,12], ty ∈ [8,47]
+    expect(map.isWalkable(11, 15)).toBe(false);
   });
 
   it('returns true for grass tile at origin (0,0)', () => {
+    // (0,0) is in the stone mountain band (rows 0-4), but stone is walkable
     expect(map.isWalkable(0, 0)).toBe(true);
   });
 
-  it('returns true for a known grass tile at (1,1)', () => {
-    expect(map.isWalkable(1, 1)).toBe(true);
+  it('returns true for a known grass tile at (25,25) inside the village plaza', () => {
+    expect(map.isWalkable(25, 25)).toBe(true);
   });
 
   it('returns true for forest tile (non-water)', () => {
-    // Forest patch: tx > 5 && tx < 18 && ty > 35 && ty < 55
-    expect(map.isWalkable(10, 40)).toBe(true);
+    // Forest SW patch: fillRect(0, 48, 18, 16) => tx ∈ [0,17], ty ∈ [48,63]
+    expect(map.isWalkable(5, 55)).toBe(true);
   });
 
   it('returns true for stone tile (non-water)', () => {
-    // Stone patch: tx > 40 && tx < 55 && ty > 5 && ty < 20
-    expect(map.isWalkable(45, 10)).toBe(true);
+    // Stone mountain band fillRect(0, 0, 64, 5) => ty ∈ [0,4], any tx
+    expect(map.isWalkable(45, 2)).toBe(true);
   });
 });
 
@@ -249,7 +250,7 @@ describe('WorldMap — boundary conditions', () => {
   });
 });
 
-describe('WorldMap — water region boundaries', () => {
+describe('WorldMap — water region boundaries (hand-authored river & lake)', () => {
   let map: WorldMap;
 
   beforeEach(() => {
@@ -257,22 +258,31 @@ describe('WorldMap — water region boundaries', () => {
     map = new WorldMap(mockScene as never, 42);
   });
 
-  it('tile at tx=20 (boundary of vertical river) is NOT water', () => {
-    // Condition: tx > 20 (strict), so tx=20 is NOT water
-    expect(map.isWalkable(20, 15)).toBe(true);
+  // River is fillRect(10, 8, 3, 40) → tx ∈ [10,12], ty ∈ [8,47]
+
+  it('tile at tx=9 (just left of vertical river) is NOT water', () => {
+    expect(map.isWalkable(9, 15)).toBe(true);
   });
 
-  it('tile at tx=21 inside vertical river IS water (ty=15 in range)', () => {
-    expect(map.isWalkable(21, 15)).toBe(false);
+  it('tile at tx=10 inside vertical river IS water', () => {
+    expect(map.isWalkable(10, 15)).toBe(false);
   });
 
-  it('tile at tx=23 (right boundary of vertical river) is NOT water', () => {
-    // Condition: tx < 23 (strict), so tx=23 is NOT water
-    expect(map.isWalkable(23, 15)).toBe(true);
+  it('tile at tx=12 (right edge of river) IS water', () => {
+    expect(map.isWalkable(12, 15)).toBe(false);
   });
 
-  it('tile at ty=29 inside horizontal river IS water (tx=15 in range)', () => {
-    // Condition: ty > 28 && ty < 31 && tx > 5 && tx < 35
-    expect(map.isWalkable(15, 29)).toBe(false);
+  it('tile at tx=13 (just right of river) is NOT water', () => {
+    expect(map.isWalkable(13, 15)).toBe(true);
+  });
+
+  // Lake is ellipse centered at (44, 28) with rx=5, ry=4
+
+  it('tile at center of lake (44, 28) IS water', () => {
+    expect(map.isWalkable(44, 28)).toBe(false);
+  });
+
+  it('tile far from lake (20, 20) is NOT water (grass)', () => {
+    expect(map.isWalkable(20, 20)).toBe(true);
   });
 });

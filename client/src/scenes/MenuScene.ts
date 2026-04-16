@@ -50,8 +50,11 @@ export class MenuScene extends Phaser.Scene {
 
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
-        // Random grass wang tile variant for visual variety
-        const variant = Phaser.Math.Between(0, 15);
+        // Pick one of the 4 clean base variants (indices 0-3).
+        // Indices 4-15 are transitions/corners/inner-corners that show
+        // the upper-palette color (dirt), which would make the menu
+        // background look like chaotic dirt noise.
+        const variant = Phaser.Math.Between(0, 3);
         const tile = this.add
           .image(
             col * tileSize + tileSize / 2,
