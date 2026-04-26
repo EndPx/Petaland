@@ -1,5 +1,5 @@
 /**
- * InventoryUI.test.ts — RED phase tests for InventoryUI DOM panel.
+ * InventoryUI.test.ts — tests for NomStead-style InventoryUI DOM panel.
  *
  * InventoryUI manipulates real DOM elements.  jsdom provides the environment.
  * We create the required #inventory-panel element before each test.
@@ -41,16 +41,16 @@ describe('InventoryUI — construction', () => {
     expect(() => new InventoryUI()).toThrow('InventoryUI: #inventory-panel element not found');
   });
 
-  it('renders exactly 32 inventory slots (8 cols × 4 rows)', () => {
+  it('renders exactly 32 inventory slots (8 cols x 4 rows)', () => {
     new InventoryUI();
     const slots = document.querySelectorAll('.inv-slot');
     expect(slots).toHaveLength(32);
   });
 
-  it('renders 5 tab buttons (All, Resources, Seeds, Food, Blueprints)', () => {
+  it('renders 4 tab buttons (All, Resources, Seeds, Food)', () => {
     new InventoryUI();
     const tabs = document.querySelectorAll('.inv-tab');
-    expect(tabs).toHaveLength(5);
+    expect(tabs).toHaveLength(4);
   });
 
   it('"All" tab is active by default', () => {
@@ -59,10 +59,10 @@ describe('InventoryUI — construction', () => {
     expect(activeTab?.dataset['tab']).toBe('all');
   });
 
-  it('footer shows "0 / 32 slots used" on init', () => {
+  it('footer shows "0 / 32 slots" on init', () => {
     new InventoryUI();
-    const footer = document.getElementById('inv-footer');
-    expect(footer?.textContent).toContain('0 / 32 slots used');
+    const footer = document.getElementById('inv-footer-count');
+    expect(footer?.textContent).toContain('0 / 32 slots');
   });
 });
 
@@ -78,23 +78,23 @@ describe('InventoryUI — addItem()', () => {
 
   it('adds a new item type to the inventory', () => {
     inv.addItem(ItemType.Wood, 5);
-    const footer = document.getElementById('inv-footer');
-    expect(footer?.textContent).toContain('1 / 32 slots used');
+    const footer = document.getElementById('inv-footer-count');
+    expect(footer?.textContent).toContain('1 / 32 slots');
   });
 
   it('stacks quantity when adding same item type twice', () => {
     inv.addItem(ItemType.Wood, 5);
     inv.addItem(ItemType.Wood, 3);
     // Still 1 unique item type (stacked)
-    const footer = document.getElementById('inv-footer');
-    expect(footer?.textContent).toContain('1 / 32 slots used');
+    const footer = document.getElementById('inv-footer-count');
+    expect(footer?.textContent).toContain('1 / 32 slots');
   });
 
   it('adds two different item types as separate entries', () => {
     inv.addItem(ItemType.Wood, 1);
     inv.addItem(ItemType.Stone, 1);
-    const footer = document.getElementById('inv-footer');
-    expect(footer?.textContent).toContain('2 / 32 slots used');
+    const footer = document.getElementById('inv-footer-count');
+    expect(footer?.textContent).toContain('2 / 32 slots');
   });
 
   it('shows quantity badge when item quantity > 1', () => {
@@ -111,8 +111,8 @@ describe('InventoryUI — addItem()', () => {
 
   it('defaults quantity to 1 when no quantity arg given', () => {
     inv.addItem(ItemType.Wheat);
-    const footer = document.getElementById('inv-footer');
-    expect(footer?.textContent).toContain('1 / 32 slots used');
+    const footer = document.getElementById('inv-footer-count');
+    expect(footer?.textContent).toContain('1 / 32 slots');
     // No badge since qty = 1
     expect(document.querySelector('.inv-slot-qty')).toBeNull();
   });
@@ -158,8 +158,8 @@ describe('InventoryUI — removeItem()', () => {
   it('removes item completely when removing all quantity', () => {
     inv.addItem(ItemType.Wood, 3);
     inv.removeItem(ItemType.Wood, 3);
-    const footer = document.getElementById('inv-footer');
-    expect(footer?.textContent).toContain('0 / 32 slots used');
+    const footer = document.getElementById('inv-footer-count');
+    expect(footer?.textContent).toContain('0 / 32 slots');
   });
 
   it('removes item when reducing to exactly 0', () => {
@@ -173,8 +173,8 @@ describe('InventoryUI — removeItem()', () => {
     inv.addItem(ItemType.Wood, 5);
     inv.addItem(ItemType.Stone, 3);
     inv.removeItem(ItemType.Wood, 5);
-    const footer = document.getElementById('inv-footer');
-    expect(footer?.textContent).toContain('1 / 32 slots used');
+    const footer = document.getElementById('inv-footer-count');
+    expect(footer?.textContent).toContain('1 / 32 slots');
   });
 });
 
@@ -191,15 +191,15 @@ describe('InventoryUI — setItems()', () => {
   it('replaces all items with new list', () => {
     inv.addItem(ItemType.Wood, 5);
     inv.setItems([{ type: ItemType.Stone, quantity: 2 }]);
-    const footer = document.getElementById('inv-footer');
-    expect(footer?.textContent).toContain('1 / 32 slots used');
+    const footer = document.getElementById('inv-footer-count');
+    expect(footer?.textContent).toContain('1 / 32 slots');
   });
 
   it('clears all items when given empty array', () => {
     inv.addItem(ItemType.Wood, 5);
     inv.setItems([]);
-    const footer = document.getElementById('inv-footer');
-    expect(footer?.textContent).toContain('0 / 32 slots used');
+    const footer = document.getElementById('inv-footer-count');
+    expect(footer?.textContent).toContain('0 / 32 slots');
   });
 
   it('renders multiple items correctly', () => {
@@ -208,8 +208,8 @@ describe('InventoryUI — setItems()', () => {
       { type: ItemType.Carrot, quantity: 1 },
       { type: ItemType.Wheat, quantity: 7 },
     ]);
-    const footer = document.getElementById('inv-footer');
-    expect(footer?.textContent).toContain('3 / 32 slots used');
+    const footer = document.getElementById('inv-footer-count');
+    expect(footer?.textContent).toContain('3 / 32 slots');
   });
 });
 
@@ -255,7 +255,7 @@ describe('InventoryUI — tab filtering', () => {
   it('tab data attributes match expected values', () => {
     const tabs = document.querySelectorAll('.inv-tab');
     const tabValues = Array.from(tabs).map(t => (t as HTMLElement).dataset['tab']);
-    expect(tabValues).toEqual(['all', 'resources', 'seeds', 'food', 'blueprints']);
+    expect(tabValues).toEqual(['all', 'resources', 'seeds', 'food']);
   });
 
   it('clicking resources tab makes it active', () => {

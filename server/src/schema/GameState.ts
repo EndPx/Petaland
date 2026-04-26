@@ -1,5 +1,6 @@
 import { Schema, type, MapSchema, ArraySchema } from "@colyseus/schema";
 import { PlayerSchema } from "./PlayerSchema";
+import { PlotTileSchema, ChatMessageSchema } from "./PlotTileSchema";
 
 export class WorldObjectSchema extends Schema {
   @type("string") id: string = "";
@@ -57,6 +58,13 @@ export class GameState extends Schema {
 
   // NPCs in the world
   @type({ map: NPCSchema }) npcs = new MapSchema<NPCSchema>();
+
+  // Plot tiles placed on octagonal plots (the doodle map's clickable cells).
+  // Keyed by `${ownerId}:${cellX},${cellY}` — visitors see other players' tiles.
+  @type({ map: PlotTileSchema }) plotTiles = new MapSchema<PlotTileSchema>();
+
+  // Recent chat messages (last 50). Older messages get pruned by GameRoom.
+  @type([ChatMessageSchema]) chat = new ArraySchema<ChatMessageSchema>();
 
   // World tick counter
   @type("number") tick: number = 0;

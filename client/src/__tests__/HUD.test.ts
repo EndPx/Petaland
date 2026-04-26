@@ -1,5 +1,5 @@
 /**
- * HUD.test.ts — RED phase tests for HUD DOM-based overlay.
+ * HUD.test.ts — tests for NomStead-style HUD DOM overlay.
  *
  * The HUD class manipulates real DOM elements.  jsdom (configured in
  * vitest.config.ts) provides the DOM environment.  We create the required
@@ -73,6 +73,12 @@ describe('HUD — construction', () => {
     const el = document.getElementById('hud-energy-fill') as HTMLElement;
     expect(el?.style.width).toBe('100%');
   });
+
+  it('renders level badge showing "1" on init', () => {
+    new HUD({} as never, defaultState);
+    const el = document.getElementById('hud-level-text');
+    expect(el?.textContent).toBe('1');
+  });
 });
 
 describe('HUD — setEnergy()', () => {
@@ -97,25 +103,25 @@ describe('HUD — setEnergy()', () => {
     expect(el?.style.width).toBe('50%');
   });
 
-  it('shows green gradient when energy > 60%', () => {
+  it('shows rose gradient when energy > 60%', () => {
     hud.setEnergy(80, 100);
     const el = document.getElementById('hud-energy-fill') as HTMLElement;
-    // jsdom normalizes hex #4ade80 → rgb(74, 222, 128)
-    expect(el?.style.background).toContain('rgb(74, 222, 128)');
+    // jsdom normalizes hex #f47b8c -> rgb(244, 123, 140)
+    expect(el?.style.background).toContain('rgb(244, 123, 140)');
   });
 
-  it('shows yellow/amber gradient when energy between 30% and 60%', () => {
+  it('shows amber gradient when energy between 30% and 60%', () => {
     hud.setEnergy(45, 100);
     const el = document.getElementById('hud-energy-fill') as HTMLElement;
-    // jsdom normalizes hex #fbbf24 → rgb(251, 191, 36)
-    expect(el?.style.background).toContain('rgb(251, 191, 36)');
+    // jsdom normalizes hex #f0c050 -> rgb(240, 192, 80)
+    expect(el?.style.background).toContain('rgb(240, 192, 80)');
   });
 
   it('shows red gradient when energy <= 30%', () => {
     hud.setEnergy(20, 100);
     const el = document.getElementById('hud-energy-fill') as HTMLElement;
-    // jsdom normalizes hex #ef4444 → rgb(239, 68, 68)
-    expect(el?.style.background).toContain('rgb(239, 68, 68)');
+    // jsdom normalizes hex #e85050 -> rgb(232, 80, 80)
+    expect(el?.style.background).toContain('rgb(232, 80, 80)');
   });
 
   it('shows energy text with custom maxEnergy', () => {
@@ -225,33 +231,62 @@ describe('HUD — setWalletAddress()', () => {
 
   it('truncates long addresses to "XXXX...XXXX" format', () => {
     hud.setWalletAddress('Demo1111111111111111111111111111111111111111');
-    const el = document.getElementById('hud-wallet');
+    const el = document.getElementById('hud-wallet-text');
     expect(el?.textContent).toBe('Demo...1111');
   });
 
   it('displays short address (<=12 chars) without truncation', () => {
     hud.setWalletAddress('Short123');
-    const el = document.getElementById('hud-wallet');
+    const el = document.getElementById('hud-wallet-text');
     expect(el?.textContent).toBe('Short123');
   });
 
   it('displays address of exactly 12 chars without truncation', () => {
     hud.setWalletAddress('123456789012');
-    const el = document.getElementById('hud-wallet');
+    const el = document.getElementById('hud-wallet-text');
     expect(el?.textContent).toBe('123456789012');
   });
 
   it('truncates address of exactly 13 chars', () => {
     hud.setWalletAddress('1234567890123');
-    const el = document.getElementById('hud-wallet');
+    const el = document.getElementById('hud-wallet-text');
     expect(el?.textContent).toBe('1234...0123');
   });
 
-  it('changes wallet text color to green when address is set', () => {
+  it('adds "connected" class to wallet dot when address is set', () => {
     hud.setWalletAddress('SomeWalletAddress123456789');
-    const el = document.getElementById('hud-wallet') as HTMLElement;
-    // jsdom normalizes hex #4ade80 → rgb(74, 222, 128)
-    expect(el?.style.color).toBe('rgb(74, 222, 128)');
+    const dot = document.getElementById('hud-wallet-dot') as HTMLElement;
+    expect(dot.classList.contains('connected')).toBe(true);
+  });
+});
+
+describe('HUD — setLevel()', () => {
+  let hud: HUD;
+
+  beforeEach(() => {
+    createHUDOverlay();
+    hud = new HUD({} as never, defaultState);
+  });
+
+  afterEach(() => removeHUDOverlay());
+
+  it('updates level badge text', () => {
+    hud.setLevel(5, 0);
+    const el = document.getElementById('hud-level-text');
+    expect(el?.textContent).toBe('5');
+  });
+
+  it('updates level label text', () => {
+    hud.setLevel(3, 0);
+    const el = document.getElementById('hud-level-label');
+    expect(el?.textContent).toBe('Level 3');
+  });
+
+  it('updates XP bar fill width', () => {
+    // Level 2, xp=100, xpMax=200 → 50%
+    hud.setLevel(2, 100);
+    const el = document.getElementById('hud-xp-fill') as HTMLElement;
+    expect(el?.style.width).toBe('50%');
   });
 });
 
@@ -272,7 +307,7 @@ describe('HUD — initial state variations', () => {
   afterEach(() => removeHUDOverlay());
 
   it('renders partial energy correctly', () => {
-    const hud = new HUD({} as never, { energy: 30, maxEnergy: 100, silver: 50, petal: 5 });
+    new HUD({} as never, { energy: 30, maxEnergy: 100, silver: 50, petal: 5 });
     const el = document.getElementById('hud-energy-text');
     expect(el?.textContent).toBe('30 / 100');
   });

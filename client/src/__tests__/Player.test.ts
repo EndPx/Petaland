@@ -48,6 +48,7 @@ vi.mock('phaser', () => {
     setDepth = vi.fn().mockReturnThis();
     setOrigin = vi.fn().mockReturnThis();
     setTexture = vi.fn().mockReturnThis();
+    setScale = vi.fn().mockReturnThis();
     setPosition(x: number, y: number) {
       this.x = x;
       this.y = y;
@@ -86,7 +87,7 @@ describe('Player — initial state (tile-based constructor)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Constructor: (scene, tileX, tileY, character)
-    // tileX=5, tileY=10 → pixel: (5*16+8, 10*16+8) = (88, 168)
+    // tileX=5, tileY=10 → pixel center of tile
     player = new Player(mockScene as never, 5, 10);
   });
 
@@ -153,7 +154,7 @@ describe('Player — tile accessors', () => {
     expect(player.getTileY()).toBe(10);
   });
 
-  it('tile (0,0) gives pixel center (8,8)', () => {
+  it('tile (0,0) gives pixel center (TILE_SIZE/2, TILE_SIZE/2)', () => {
     const p = new Player(mockScene as never, 0, 0);
     expect(p.x).toBe(TILE_SIZE / 2);
     expect(p.y).toBe(TILE_SIZE / 2);

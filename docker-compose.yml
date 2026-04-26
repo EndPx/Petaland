@@ -1,0 +1,94 @@
+# ─── Petaland production — docker-compose ───────────────────────────────────
+# Run on your VPS:
+#   docker compose up -d          # start all services
+#   docker compose logs -f server # tail logs
+#   docker compose pull && docker compose up -d  # update
+#
+# Required env (create .env in this folder):
+#   DOMAIN=api.your-domain.com
+#   POSTGRES_PASSWORD=...
+#   JWT_SECRET=...
+
+version: "3.9"
+
+services:
+  # ─── Game server (Colyseus) ───────────────────────────────────────────────
+  server:
+    build: ./server
+    container_name: petaland-server
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 2567
+      DATABASE_URL: postgresql://petaland:${POSTGRES_PASSWORD}@db:5432/petaland
+      JWT_SECRET: ${JWT_SECRET}
+      HELIUS_API_KEY: ${HELIUS_API_KEY}
+      SOLANA_CLUSTER: ${SOLANA_CLUSTER:-devnet}
+    expose:
+      - "2567"
+    depends_on:
+      - db
+    networks:
+      - petaland-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  # ─── Postgres (state persistence) ─────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: petaland-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: petaland
+      POSTGRES_USER: petaland
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - petaland-db-data:/var/lib/postgresql/data
+      - ./server/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - petaland-net
+    expose:
+      - "5432"
+
+  # ─── nginx reverse proxy with WSS termination ─────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: petaland-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - certbot-webroot:/var/www/certbot:ro
+    depends_on:
+      - server
+    networks:
+      - petaland-net
+
+  # ─── Certbot for free Let's Encrypt SSL ───────────────────────────────────
+  certbot:
+    image: certbot/certbot:latest
+    container_name: petaland-certbot
+    volumes:
+      - ./nginx/certs:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
+    entrypoint: >
+      sh -c 'trap exit TERM;
+      while :; do
+        certbot renew --webroot -w /var/www/certbot --quiet;
+        sleep 12h & wait $${!};
+      done'
+
+networks:
+  petaland-net:
+    driver: bridge
+
+volumes:
+  petaland-db-data:
+  certbot-webroot:

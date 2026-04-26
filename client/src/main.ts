@@ -16,8 +16,8 @@ const gameConfig: Phaser.Types.Core.GameConfig = {
   width: GAME_WIDTH,
   height: GAME_HEIGHT,
   parent: 'game-container',
-  backgroundColor: '#2d5a27',
-  pixelArt: true,                // disables anti-aliasing on canvas
+  backgroundColor: '#a8b87d',       // doodle olive-green (NomStead-mirror)
+  pixelArt: false,               // doodle aesthetic — smooth Graphics lines
   roundPixels: true,             // prevents sub-pixel rendering
 
   physics: {

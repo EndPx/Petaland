@@ -1,6 +1,6 @@
 import express from "express";
 import { createServer } from "http";
-import { Server } from "@colyseus/core";
+import { Server, matchMaker } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { monitor } from "@colyseus/monitor";
 import { GameRoom } from "./rooms/GameRoom";
@@ -69,9 +69,10 @@ async function bootstrap() {
   // API route: list active rooms (useful for Phaser lobby)
   app.get("/api/rooms", async (_req, res) => {
     try {
-      const rooms = await gameServer.driver.findAll({});
+      const rooms = await matchMaker.query({});
       res.json(rooms);
     } catch (err) {
+      console.error("[Petaland] /api/rooms error:", err);
       res.status(500).json({ error: "Failed to list rooms." });
     }
   });

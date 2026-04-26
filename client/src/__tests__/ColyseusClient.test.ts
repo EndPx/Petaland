@@ -17,6 +17,36 @@ vi.stubGlobal('import', {
   },
 });
 
+// Mock phaser — ColyseusClient imports EventBus which extends Phaser.Events.EventEmitter
+vi.mock('phaser', () => {
+  class MockEmitter {
+    private listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+    on(event: string, fn: (...args: unknown[]) => void): this {
+      const arr = this.listeners.get(event) ?? [];
+      arr.push(fn);
+      this.listeners.set(event, arr);
+      return this;
+    }
+    off(event: string, fn?: (...args: unknown[]) => void): this {
+      if (!fn) this.listeners.delete(event);
+      else {
+        const arr = this.listeners.get(event) ?? [];
+        this.listeners.set(event, arr.filter((f) => f !== fn));
+      }
+      return this;
+    }
+    emit(event: string, ...args: unknown[]): boolean {
+      (this.listeners.get(event) ?? []).forEach((fn) => fn(...args));
+      return true;
+    }
+  }
+  return {
+    default: {
+      Events: { EventEmitter: MockEmitter },
+    },
+  };
+});
+
 import { ColyseusClient } from '../network/ColyseusClient';
 import type { MovePayload, PlayerState, ChatMessage, ServerMessage } from '../types/index';
 
@@ -52,16 +82,18 @@ describe('ColyseusClient — connect()', () => {
   });
 
   it('sets connected to true after connect()', async () => {
-    await client.connect('wallet_abc');
+    await client.connect({ walletAddress: 'wallet_abc' });
     expect(client.isConnected()).toBe(true);
   });
 
   it('returns a promise that resolves', async () => {
-    await expect(client.connect('wallet_abc')).resolves.toBeUndefined();
+    await expect(
+      client.connect({ walletAddress: 'wallet_abc' }),
+    ).resolves.toBeUndefined();
   });
 
   it('is connected after connecting with any wallet address', async () => {
-    await client.connect('Demo1111111111111111111111111111111111111111');
+    await client.connect({ walletAddress: 'Demo1111111111111111111111111111111111111111' });
     expect(client.isConnected()).toBe(true);
   });
 });
@@ -71,7 +103,7 @@ describe('ColyseusClient — disconnect()', () => {
 
   beforeEach(async () => {
     client = new ColyseusClient('ws://localhost:2567');
-    await client.connect('wallet_abc');
+    await client.connect({ walletAddress: 'wallet_abc' });
   });
 
   it('sets connected to false after disconnect()', async () => {
@@ -110,7 +142,7 @@ describe('ColyseusClient — sendMove() guard', () => {
   });
 
   it('does not throw when called while connected', async () => {
-    await client.connect('wallet_abc');
+    await client.connect({ walletAddress: 'wallet_abc' });
     expect(() => client.sendMove(payload)).not.toThrow();
   });
 
@@ -133,7 +165,7 @@ describe('ColyseusClient — sendChat() guard', () => {
   });
 
   it('does not throw when connected', async () => {
-    await client.connect('wallet_abc');
+    await client.connect({ walletAddress: 'wallet_abc' });
     expect(() => client.sendChat('hello world')).not.toThrow();
   });
 });
@@ -150,7 +182,7 @@ describe('ColyseusClient — sendGather() guard', () => {
   });
 
   it('does not throw when connected', async () => {
-    await client.connect('wallet_abc');
+    await client.connect({ walletAddress: 'wallet_abc' });
     expect(() => client.sendGather('rock_1')).not.toThrow();
   });
 });
@@ -167,7 +199,7 @@ describe('ColyseusClient — sendCraft() guard', () => {
   });
 
   it('does not throw when connected', async () => {
-    await client.connect('wallet_abc');
+    await client.connect({ walletAddress: 'wallet_abc' });
     expect(() => client.sendCraft('workbench_blueprint')).not.toThrow();
   });
 });
@@ -180,23 +212,23 @@ describe('ColyseusClient — callback registration', () => {
   });
 
   it('onPlayersState() accepts a handler without throwing', () => {
-    const handler = vi.fn<[Map<string, PlayerState>], void>();
+    const handler = vi.fn((_state: Map<string, PlayerState>) => {});
     expect(() => client.onPlayersState(handler)).not.toThrow();
   });
 
   it('onChat() accepts a handler without throwing', () => {
-    const handler = vi.fn<[ChatMessage], void>();
+    const handler = vi.fn((_msg: ChatMessage) => {});
     expect(() => client.onChat(handler)).not.toThrow();
   });
 
   it('onServerMessage() accepts a handler without throwing', () => {
-    const handler = vi.fn<[ServerMessage], void>();
+    const handler = vi.fn((_msg: ServerMessage) => {});
     expect(() => client.onServerMessage(handler)).not.toThrow();
   });
 
   it('handlers can be replaced by registering again', () => {
-    const handler1 = vi.fn<[Map<string, PlayerState>], void>();
-    const handler2 = vi.fn<[Map<string, PlayerState>], void>();
+    const handler1 = vi.fn((_state: Map<string, PlayerState>) => {});
+    const handler2 = vi.fn((_state: Map<string, PlayerState>) => {});
     expect(() => {
       client.onPlayersState(handler1);
       client.onPlayersState(handler2);
@@ -212,20 +244,20 @@ describe('ColyseusClient — connect/disconnect lifecycle sequence', () => {
   });
 
   it('can connect → disconnect → reconnect', async () => {
-    await client.connect('wallet_1');
+    await client.connect({ walletAddress: 'wallet_1' });
     expect(client.isConnected()).toBe(true);
 
     await client.disconnect();
     expect(client.isConnected()).toBe(false);
 
-    await client.connect('wallet_2');
+    await client.connect({ walletAddress: 'wallet_2' });
     expect(client.isConnected()).toBe(true);
   });
 
   it('serverUrl is unchanged across connect/disconnect cycles', async () => {
     const url = 'ws://stable:2567';
     const c = new ColyseusClient(url);
-    await c.connect('w1');
+    await c.connect({ walletAddress: 'w1' });
     await c.disconnect();
     expect(c.getServerUrl()).toBe(url);
   });

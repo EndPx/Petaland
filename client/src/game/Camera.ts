@@ -10,8 +10,8 @@ import { CAMERA_ZOOM, CAMERA_LERP } from '../config';
 export class Camera {
   private cam: Phaser.Cameras.Scene2D.Camera;
   private currentZoom: number;
-  private readonly minZoom = 1;
-  private readonly maxZoom = 6;
+  private readonly minZoom = 0.5;
+  private readonly maxZoom = 4;
   private readonly zoomStep = 0.5;
   private zoomKeys: {
     zoomIn: Phaser.Input.Keyboard.Key;

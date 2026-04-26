@@ -1,13 +1,10 @@
 /**
- * InventoryUI — DOM-based inventory panel stub.
+ * InventoryUI — NomStead-style inventory panel.
  *
- * TODO: Full implementation:
- *   - Grid of item slots (8 cols × 4 rows = 32 slots)
- *   - Drag & drop items
- *   - Right-click context menu (use, drop, equip)
- *   - Item tooltips on hover
- *   - Tabs: All / Resources / Seeds / Food / Blueprints
- *   - Sync with Colyseus server inventory state
+ * Design: warm white panel, rounded corners, soft shadows.
+ * Centered modal with translucent backdrop.
+ * Grid of item slots (8 cols x 4 rows = 32 slots).
+ * Tabs: All / Resources / Seeds / Food
  */
 
 import { InventoryItem, ItemType } from '../types/index';
@@ -32,122 +29,207 @@ export class InventoryUI {
   private buildDOM(): void {
     this.panel.innerHTML = `
       <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+
+        #inv-backdrop {
+          position: fixed;
+          inset: 0;
+          background: rgba(60, 40, 20, 0.25);
+          backdrop-filter: blur(2px);
+          -webkit-backdrop-filter: blur(2px);
+          z-index: 19;
+        }
+
         #inv-container {
-          background: #1a1a2e;
-          border: 2px solid #4ade80;
-          border-radius: 6px;
-          padding: 10px;
-          min-width: 320px;
-          font-family: 'Courier New', monospace;
-          color: #ffffff;
-          box-shadow: 0 0 20px #4ade8040;
+          position: relative;
+          z-index: 20;
+          background: #fffdf8;
+          border-radius: 16px;
+          padding: 20px 24px 16px;
+          min-width: 380px;
+          font-family: 'Nunito', sans-serif;
+          color: #4a3828;
+          box-shadow:
+            0 12px 40px rgba(100, 60, 20, 0.2),
+            0 4px 12px rgba(100, 60, 20, 0.1),
+            inset 0 1px 0 rgba(255, 255, 255, 0.8);
+          border: 1px solid rgba(180, 150, 120, 0.15);
+        }
+
+        /* Header */
+        #inv-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 14px;
+          padding-bottom: 10px;
+          border-bottom: 1px solid rgba(180, 150, 120, 0.12);
         }
         #inv-title {
-          text-align: center;
-          font-size: 14px;
-          color: #4ade80;
-          font-weight: bold;
-          letter-spacing: 2px;
-          margin-bottom: 8px;
-          border-bottom: 1px solid #4ade8040;
-          padding-bottom: 6px;
+          font-size: 16px;
+          font-weight: 800;
+          color: #4a3828;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        #inv-title-icon {
+          font-size: 20px;
         }
         #inv-close {
-          float: right;
-          cursor: pointer;
-          color: #9ca3af;
-          font-size: 16px;
-          line-height: 1;
-          pointer-events: all;
-        }
-        #inv-close:hover { color: #ef4444; }
-
-        #inv-tabs {
-          display: flex;
-          gap: 4px;
-          margin-bottom: 8px;
-        }
-        .inv-tab {
-          background: #111827;
-          border: 1px solid #374151;
-          color: #6b7280;
-          padding: 3px 8px;
-          font-size: 10px;
-          font-family: 'Courier New', monospace;
-          cursor: pointer;
-          border-radius: 3px;
-          pointer-events: all;
-        }
-        .inv-tab.active, .inv-tab:hover {
-          background: #065f46;
-          border-color: #4ade80;
-          color: #4ade80;
-        }
-
-        #inv-grid {
-          display: grid;
-          grid-template-columns: repeat(8, 36px);
-          gap: 3px;
-        }
-        .inv-slot {
-          width: 36px;
-          height: 36px;
-          background: #111827;
-          border: 1px solid #374151;
-          border-radius: 3px;
+          width: 28px;
+          height: 28px;
+          border-radius: 8px;
+          background: #f5ece0;
+          border: 1px solid rgba(180, 150, 120, 0.12);
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 18px;
+          cursor: pointer;
+          font-size: 14px;
+          color: #9a8672;
+          transition: all 0.15s ease;
+          pointer-events: all;
+          font-family: 'Nunito', sans-serif;
+          font-weight: 700;
+          line-height: 1;
+        }
+        #inv-close:hover {
+          background: #f0e0d0;
+          color: #d45050;
+          transform: scale(1.05);
+        }
+
+        /* Tabs */
+        #inv-tabs {
+          display: flex;
+          gap: 4px;
+          margin-bottom: 12px;
+          background: #f5ece0;
+          border-radius: 8px;
+          padding: 3px;
+        }
+        .inv-tab {
+          background: transparent;
+          border: none;
+          color: #9a8672;
+          padding: 5px 12px;
+          font-size: 12px;
+          font-weight: 600;
+          font-family: 'Nunito', sans-serif;
+          cursor: pointer;
+          border-radius: 6px;
+          pointer-events: all;
+          transition: all 0.15s ease;
+        }
+        .inv-tab:hover {
+          color: #6b5540;
+          background: rgba(255, 255, 255, 0.5);
+        }
+        .inv-tab.active {
+          background: #fffdf8;
+          color: #6b9e3e;
+          font-weight: 700;
+          box-shadow: 0 1px 4px rgba(100, 60, 20, 0.08);
+        }
+
+        /* Grid */
+        #inv-grid {
+          display: grid;
+          grid-template-columns: repeat(8, 1fr);
+          gap: 4px;
+        }
+        .inv-slot {
+          aspect-ratio: 1;
+          background: #f5ece0;
+          border: 2px solid transparent;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 20px;
           position: relative;
           cursor: pointer;
           pointer-events: all;
-          transition: border-color 0.1s;
+          transition: all 0.12s ease;
         }
         .inv-slot:hover {
-          border-color: #4ade80;
-          background: #1e3a2e;
+          background: #ece2d4;
+          border-color: #c0a882;
+          transform: scale(1.04);
         }
         .inv-slot.occupied {
-          border-color: #374151;
+          background: #f0e8d8;
+          border-color: rgba(180, 150, 120, 0.2);
+        }
+        .inv-slot.occupied:hover {
+          border-color: #6b9e3e;
+          background: #eef5e8;
         }
         .inv-slot-qty {
           position: absolute;
           bottom: 1px;
-          right: 3px;
-          font-size: 9px;
-          color: #ffffff;
-          font-family: 'Courier New', monospace;
-          text-shadow: 1px 1px 0 #000;
+          right: 4px;
+          font-size: 10px;
+          font-weight: 700;
+          color: #6b5540;
+          font-family: 'Nunito', sans-serif;
         }
 
+        /* Footer */
         #inv-footer {
-          margin-top: 8px;
+          margin-top: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          font-size: 11px;
+          color: #b0a090;
+          font-weight: 600;
+        }
+        #inv-footer-hint {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .inv-key-hint {
+          background: #f0e8dc;
+          border: 1px solid rgba(180, 150, 120, 0.15);
+          border-radius: 4px;
+          padding: 1px 5px;
           font-size: 10px;
-          color: #4b5563;
-          text-align: center;
+          font-weight: 700;
+          color: #9a8672;
         }
       </style>
 
+      <div id="inv-backdrop"></div>
       <div id="inv-container">
-        <div id="inv-title">
-          <span id="inv-close" onclick="document.getElementById('inventory-panel').style.display='none'">✕</span>
-          INVENTORY
+        <div id="inv-header">
+          <div id="inv-title">
+            <span id="inv-title-icon">&#127890;</span>
+            Inventory
+          </div>
+          <button id="inv-close">&times;</button>
         </div>
         <div id="inv-tabs">
           <button class="inv-tab active" data-tab="all">All</button>
           <button class="inv-tab" data-tab="resources">Resources</button>
           <button class="inv-tab" data-tab="seeds">Seeds</button>
           <button class="inv-tab" data-tab="food">Food</button>
-          <button class="inv-tab" data-tab="blueprints">Blueprints</button>
         </div>
         <div id="inv-grid"></div>
-        <div id="inv-footer">Press I to close  •  0 / 32 slots used</div>
+        <div id="inv-footer">
+          <div id="inv-footer-hint">
+            Press <span class="inv-key-hint">I</span> to close
+          </div>
+          <div id="inv-footer-count">0 / 32 slots</div>
+        </div>
       </div>
     `;
 
     this.renderGrid();
     this.bindTabEvents();
+    this.bindCloseEvents();
   }
 
   // ── Grid Rendering ────────────────────────────────────────────────────────────
@@ -165,7 +247,7 @@ export class InventoryUI {
       const item = filteredItems[i];
       if (item) {
         slots.push(`
-          <div class="inv-slot occupied" title="${item.type} ×${item.quantity}">
+          <div class="inv-slot occupied" title="${item.type} x${item.quantity}">
             <span>${this.getItemEmoji(item.type)}</span>
             ${item.quantity > 1 ? `<span class="inv-slot-qty">${item.quantity}</span>` : ''}
           </div>
@@ -177,9 +259,9 @@ export class InventoryUI {
     grid.innerHTML = slots.join('');
 
     // Update footer count
-    const footer = document.getElementById('inv-footer');
+    const footer = document.getElementById('inv-footer-count');
     if (footer) {
-      footer.textContent = `Press I to close  •  ${this.items.length} / ${InventoryUI.SLOT_COUNT} slots used`;
+      footer.textContent = `${this.items.length} / ${InventoryUI.SLOT_COUNT} slots`;
     }
   }
 
@@ -195,6 +277,17 @@ export class InventoryUI {
         this.renderGrid(filter);
       });
     });
+  }
+
+  private bindCloseEvents(): void {
+    const closeBtn = document.getElementById('inv-close');
+    const backdrop = document.getElementById('inv-backdrop');
+    const hidePanel = () => {
+      this.panel.style.display = 'none';
+      this.isVisible = false;
+    };
+    closeBtn?.addEventListener('click', hidePanel);
+    backdrop?.addEventListener('click', hidePanel);
   }
 
   // ── Public API ────────────────────────────────────────────────────────────────
@@ -243,18 +336,18 @@ export class InventoryUI {
 
   private getItemEmoji(type: ItemType): string {
     const map: Partial<Record<ItemType, string>> = {
-      [ItemType.Wood]: '🪵',
-      [ItemType.Stone]: '🪨',
-      [ItemType.Carrot]: '🥕',
-      [ItemType.Wheat]: '🌾',
-      [ItemType.CarrotSeed]: '🌱',
-      [ItemType.WheatSeed]: '🌱',
-      [ItemType.Bread]: '🍞',
-      [ItemType.CarrotSoup]: '🥣',
-      [ItemType.Silver]: '🪙',
-      [ItemType.Petal]: '🌸',
+      [ItemType.Wood]: '\u{1FAB5}',
+      [ItemType.Stone]: '\u{1FAA8}',
+      [ItemType.Carrot]: '\u{1F955}',
+      [ItemType.Wheat]: '\u{1F33E}',
+      [ItemType.CarrotSeed]: '\u{1F331}',
+      [ItemType.WheatSeed]: '\u{1F331}',
+      [ItemType.Bread]: '\u{1F35E}',
+      [ItemType.CarrotSoup]: '\u{1F963}',
+      [ItemType.Silver]: '\u{1FA99}',
+      [ItemType.Petal]: '\u{1F338}',
     };
-    return map[type] ?? '📦';
+    return map[type] ?? '\u{1F4E6}';
   }
 
   private getItemCategory(type: ItemType): string {

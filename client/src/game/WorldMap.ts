@@ -3,19 +3,15 @@ import { TileType } from '../types/index';
 import { TILE_SIZE, WORLD_WIDTH_TILES, WORLD_HEIGHT_TILES } from '../config';
 
 /**
- * WorldMap — NomStead-style homestead layout.
+ * WorldMap — NomStead-mirror layout.
  *
- * The map is a small, focused world (32x32 tiles) with:
- *   1. Grass base everywhere
- *   2. Central farm area: 8x8 grid of soil plots
- *   3. Stone border around the farm (octagonal shape)
- *   4. Entrance gap at the bottom of the border
- *   5. Scattered trees, bushes, and flowers in the grass
- *   6. A small pond in the NE corner
- *   7. Forest patches in corners
- *
- * The player starts inside the farm area and can walk out
- * through the entrance to explore the surroundings.
+ * Specs (from inspecting NomStead):
+ *   - 64×64px tiles, canvas fills window
+ *   - 10×10 farm grid (border + inner 8×8 plots)
+ *   - Octagonal stone border, entrance gap at bottom
+ *   - Grass background with small decorations
+ *   - Character ~1.25 tiles wide
+ *   - No camera zoom
  */
 export class WorldMap {
   private scene: Phaser.Scene;
@@ -25,11 +21,12 @@ export class WorldMap {
 
   private biomes: TileType[][] = [];
 
-  // Farm area bounds (tile coords)
-  private readonly farmX = 12;  // farm left edge
-  private readonly farmY = 10;  // farm top edge
-  private readonly farmW = 8;   // farm width in tiles
-  private readonly farmH = 8;   // farm height in tiles
+  // Farm area: 8×8 inner plots, border makes it 10×10 total
+  // Centered in 24×18 world → farm center at (12, 9)
+  private readonly farmX = 8;
+  private readonly farmY = 5;
+  private readonly farmW = 8;
+  private readonly farmH = 8;
 
   constructor(scene: Phaser.Scene, _seed = 42) {
     this.scene = scene;
@@ -46,12 +43,11 @@ export class WorldMap {
   }
 
   /**
-   * Build NomStead-style biome grid:
+   * Build biome grid:
    *   - Grass everywhere
-   *   - Stone border ring around farm area
-   *   - Farm soil inside the border
-   *   - Small pond in NE
-   *   - Forest patches at corners
+   *   - Octagonal stone border around farm
+   *   - Entrance gap at bottom center
+   *   - Tiny pond in NE
    */
   private buildBiomeGrid(): void {
     // 1. Fill everything with grass
@@ -62,23 +58,23 @@ export class WorldMap {
       }
     }
 
-    // 2. Stone border ring around farm (1 tile thick, octagonal)
-    const bx = this.farmX - 1;
-    const by = this.farmY - 1;
-    const bw = this.farmW + 2;
-    const bh = this.farmH + 2;
+    // 2. Stone border ring (1 tile thick, octagonal)
+    const bx = this.farmX - 1;  // 7
+    const by = this.farmY - 1;  // 4
+    const bw = this.farmW + 2;  // 10
+    const bh = this.farmH + 2;  // 10
 
-    // Top and bottom edges (skip corners for octagonal)
+    // Top and bottom edges
     for (let tx = bx + 1; tx < bx + bw - 1; tx++) {
-      this.setBiome(tx, by, TileType.Stone);      // top
-      this.setBiome(tx, by + bh - 1, TileType.Stone); // bottom
+      this.setBiome(tx, by, TileType.Stone);
+      this.setBiome(tx, by + bh - 1, TileType.Stone);
     }
     // Left and right edges
     for (let ty = by + 1; ty < by + bh - 1; ty++) {
-      this.setBiome(bx, ty, TileType.Stone);       // left
-      this.setBiome(bx + bw - 1, ty, TileType.Stone); // right
+      this.setBiome(bx, ty, TileType.Stone);
+      this.setBiome(bx + bw - 1, ty, TileType.Stone);
     }
-    // Corner pieces (octagonal bevel)
+    // Corner bevels (octagonal)
     this.setBiome(bx + 1, by, TileType.Stone);
     this.setBiome(bx, by + 1, TileType.Stone);
     this.setBiome(bx + bw - 2, by, TileType.Stone);
@@ -88,23 +84,13 @@ export class WorldMap {
     this.setBiome(bx + bw - 2, by + bh - 1, TileType.Stone);
     this.setBiome(bx + bw - 1, by + bh - 2, TileType.Stone);
 
-    // 3. Entrance gap at bottom center of border (2 tiles wide)
-    const entranceTX = this.farmX + Math.floor(this.farmW / 2) - 1;
+    // 3. Entrance gap at bottom center (2 tiles wide)
+    const entranceTX = this.farmX + Math.floor(this.farmW / 2) - 1; // 11
     this.setBiome(entranceTX, by + bh - 1, TileType.Grass);
     this.setBiome(entranceTX + 1, by + bh - 1, TileType.Grass);
 
-    // 4. Small pond in NE corner
-    this.fillEllipse(26, 5, 3, 2, TileType.Water);
-
-    // 5. Forest patches at map corners
-    this.fillRect(0, 0, 4, 4, TileType.Forest);
-    this.fillRect(28, 0, 4, 4, TileType.Forest);
-    this.fillRect(0, 28, 4, 4, TileType.Forest);
-    this.fillRect(28, 28, 4, 4, TileType.Forest);
-
-    // 6. Small stone outcrops
-    this.fillRect(6, 2, 2, 2, TileType.Stone);
-    this.fillRect(24, 26, 2, 2, TileType.Stone);
+    // 4. Tiny pond NE
+    this.fillEllipse(20, 3, 1, 1, TileType.Water);
   }
 
   private setBiome(tx: number, ty: number, tile: TileType): void {
@@ -144,14 +130,12 @@ export class WorldMap {
         const key = `${tileType}_wang_${wangIndex}`;
 
         const img = this.scene.add.image(wx, wy, key).setDepth(0);
+        img.setDisplaySize(TILE_SIZE, TILE_SIZE); // scale 16px art → 64px tile
         this.tileLayer.add(img);
       }
     }
   }
 
-  /**
-   * Pick clean base variant (indices 0-3) using deterministic hash.
-   */
   private pickTileIndex(tx: number, ty: number): number {
     const h = ((tx * 73856093) ^ (ty * 19349663)) >>> 0;
     return h % 4;
@@ -160,90 +144,59 @@ export class WorldMap {
   // ── Object Placement ─────────────────────────────────────────────────────────
 
   private placeObjects(): void {
-    // ── Farm soil beds (8x8 grid inside the border) ──
+    // ── Farm soil beds (8×8 inner grid) ──
     for (let row = 0; row < this.farmH; row++) {
       for (let col = 0; col < this.farmW; col++) {
         this.placeObject('soil_bed', this.farmX + col, this.farmY + row, false);
       }
     }
 
-    // ── Village structures near farm entrance ──
-    this.placeObject('workbench', this.farmX - 3, this.farmY + 2, true);
-    this.placeObject('bonfire', this.farmX - 3, this.farmY + 5, true);
-    this.placeObject('well', this.farmX + this.farmW + 2, this.farmY + 3, true);
-    this.placeObject('storage_box', this.farmX + this.farmW + 2, this.farmY + 6, true);
-    this.placeObject('npc_shop_stall', 16, 22, true);
+    // ── Village structures flanking the farm ──
+    this.placeObject('workbench', 5, 7, true);
+    this.placeObject('bonfire', 5, 10, true);
+    this.placeObject('well', 18, 7, true);
+    this.placeObject('storage_box', 18, 10, true);
+    this.placeObject('npc_shop_stall', 12, 16, true);
 
-    // ── Trees in forest corners ──
-    this.placePatchObjects('pine_tree', 0, 0, 4, 4, 4, true);
-    this.placePatchObjects('pine_tree', 28, 0, 4, 4, 4, true);
-    this.placePatchObjects('oak_tree', 0, 28, 4, 4, 4, true);
-    this.placePatchObjects('pine_tree', 28, 28, 4, 4, 4, true);
-
-    // ── Scattered oaks in grassland ──
-    const treeSpots: [number, number][] = [
-      [5, 8], [8, 5], [24, 8], [26, 14],
-      [5, 24], [8, 26], [24, 24], [3, 16],
+    // ── Trees (prominent, NomStead-scale) ──
+    const treeScale = TILE_SIZE / 22; // ~2.9× → trees about 2×3 tiles
+    const trees: [string, number, number][] = [
+      ['pine_tree', 2, 2],
+      ['oak_tree', 4, 3],
+      ['pine_tree', 21, 2],
+      ['oak_tree', 20, 4],
+      ['oak_tree', 2, 14],
+      ['pine_tree', 4, 16],
+      ['pine_tree', 21, 15],
+      ['oak_tree', 20, 16],
+      ['oak_tree', 1, 9],
+      ['pine_tree', 22, 9],
     ];
-    for (const [tx, ty] of treeSpots) {
-      this.placeObject('oak_tree', tx, ty, true);
+    for (const [key, tx, ty] of trees) {
+      this.placeObject(key, tx, ty, true, treeScale);
     }
 
-    // ── Scattered rocks ──
-    const rockSpots: [number, number][] = [
-      [7, 3], [25, 27], [3, 20], [27, 12],
-    ];
-    for (const [tx, ty] of rockSpots) {
-      this.placeObject('rock_small', tx, ty, true);
-    }
+    // ── Rocks ──
+    this.placeObject('rock_small', 3, 6, true);
+    this.placeObject('rock_small', 21, 13, true);
 
     // ── Wild carrots near farm ──
-    const carrotSpots: [number, number][] = [
-      [9, 12], [9, 15], [22, 13], [22, 16],
-    ];
-    for (const [tx, ty] of carrotSpots) {
-      this.placeObject('wild_carrot', tx, ty, false);
-    }
+    this.placeObject('wild_carrot', 6, 8, false);
+    this.placeObject('wild_carrot', 6, 10, false);
+    this.placeObject('wild_carrot', 17, 8, false);
+    this.placeObject('wild_carrot', 17, 10, false);
 
-    // ── Flower petals scattered ──
-    const flowerSpots: [number, number][] = [
-      [6, 10], [10, 22], [22, 8], [25, 20],
-      [8, 18], [14, 24], [20, 24], [4, 14],
-    ];
-    for (const [tx, ty] of flowerSpots) {
-      this.placeObject('flower_petal', tx, ty, false);
-    }
+    // ── Flower petals ──
+    this.placeObject('flower_petal', 3, 8, false);
+    this.placeObject('flower_petal', 20, 6, false);
+    this.placeObject('flower_petal', 3, 12, false);
+    this.placeObject('flower_petal', 20, 12, false);
 
-    // ── Bushes along paths ──
-    this.placeObject('bush', 14, 21, false);
-    this.placeObject('bush', 18, 21, false);
-    this.placeObject('bush', 10, 8, false);
-    this.placeObject('bush', 22, 8, false);
-  }
-
-  private placePatchObjects(
-    key: string,
-    startX: number,
-    startY: number,
-    width: number,
-    height: number,
-    count: number,
-    solid: boolean,
-  ): void {
-    const placed = new Set<string>();
-    let attempts = 0;
-    let i = 0;
-    while (placed.size < count && attempts < count * 20) {
-      attempts++;
-      const h = (startX * 73856093 + startY * 19349663 + i * 83492791) >>> 0;
-      const tx = startX + (h % width);
-      const ty = startY + ((h >>> 8) % height);
-      i++;
-      const k = `${tx},${ty}`;
-      if (placed.has(k)) continue;
-      placed.add(k);
-      this.placeObject(key, tx, ty, solid);
-    }
+    // ── Bushes near entrance ──
+    this.placeObject('bush', 10, 15, false);
+    this.placeObject('bush', 14, 15, false);
+    this.placeObject('bush', 6, 14, false);
+    this.placeObject('bush', 18, 14, false);
   }
 
   private placeObject(
@@ -251,14 +204,18 @@ export class WorldMap {
     tileX: number,
     tileY: number,
     solid: boolean,
+    customScale?: number,
   ): void {
     const wx = tileX * TILE_SIZE + TILE_SIZE / 2;
     const wy = tileY * TILE_SIZE + TILE_SIZE / 2;
 
+    const scale = customScale ?? TILE_SIZE / 32;
+    const depth = solid ? wy : 1;
     const img = this.scene.add
       .image(wx, wy, key)
-      .setDepth(wy)
-      .setOrigin(0.5, 0.85);
+      .setDepth(depth)
+      .setOrigin(0.5, 0.85)
+      .setScale(scale);
 
     this.objectLayer.add(img);
     if (solid) {
@@ -323,7 +280,6 @@ export class WorldMap {
       return false;
     }
     const type = this.biomes[ty]?.[tx];
-    // Water and stone border are not walkable
     return type !== TileType.Water && type !== TileType.Stone;
   }
 }

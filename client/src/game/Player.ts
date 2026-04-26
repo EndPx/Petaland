@@ -88,6 +88,11 @@ export class Player extends Phaser.GameObjects.Sprite {
 
     // Add to scene (no physics — grid movement handles collisions)
     scene.add.existing(this);
+
+    // Scale 48px sprite to ~1.25 tiles wide (NomStead character is 80px on 64px tiles)
+    const charScale = (TILE_SIZE * 1.25) / 48;
+    this.setScale(charScale);
+
     this.setDepth(5);
     this.setOrigin(0.5, 0.75);
   }
@@ -197,6 +202,9 @@ export class Player extends Phaser.GameObjects.Sprite {
     this.playerData.y = this.y;
     this.playerData.direction = this.direction;
     this.playerData.isMoving = this.isMoving;
+    // Y-based depth sorting: player renders in front of objects above,
+    // behind objects below (proper top-down layering)
+    this.setDepth(this.y);
   }
 
   // ── Public Accessors ─────────────────────────────────────────────────────────

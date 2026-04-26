@@ -3,9 +3,9 @@ import Phaser from 'phaser';
 /**
  * BootScene — preloads every game asset before handing off to MenuScene.
  *
- * Tilesets: individual Wang tiles (0–15) for grass, forest, stone, water.
- * Characters: farmer_male / farmer_female directional sprites + walk frames.
- * Objects: nature, buildings, farming objects.
+ * Uses staged loading to work around Phaser 3.90 loader batch stall:
+ * assets are queued and loaded in groups via create() + load.start(),
+ * rather than relying on preload()'s auto-start which can hang.
  */
 export class BootScene extends Phaser.Scene {
   private progressBar!: Phaser.GameObjects.Graphics;
@@ -13,123 +13,151 @@ export class BootScene extends Phaser.Scene {
   private loadingText!: Phaser.GameObjects.Text;
   private percentText!: Phaser.GameObjects.Text;
 
+  /** All asset descriptors, split into stages */
+  private stages: Array<Array<{ key: string; path: string }>> = [];
+  private currentStage = 0;
+  private totalAssets = 0;
+  private loadedAssets = 0;
+
   constructor() {
     super({ key: 'BootScene' });
   }
 
-  preload(): void {
+  create(): void {
     this.createLoadingUI();
+    this.buildAssetStages();
 
-    this.load.on('progress', (value: number) => {
-      this.percentText.setText(`${Math.floor(value * 100)}%`);
-      this.progressBar.clear();
-      this.progressBar.fillStyle(0x4ade80, 1);
-      this.progressBar.fillRect(
-        this.scale.width / 2 - 150 + 5,
-        this.scale.height / 2 - 15,
-        290 * value,
-        30,
-      );
+    this.totalAssets = this.stages.reduce((n, s) => n + s.length, 0);
+    this.loadedAssets = 0;
+
+    this.load.on('progress', () => {
+      this.updateProgress();
     });
 
     this.load.on('complete', () => {
-      this.progressBar.destroy();
-      this.progressBox.destroy();
-      this.loadingText.destroy();
-      this.percentText.destroy();
+      this.loadedAssets += this.stages[this.currentStage].length;
+      this.currentStage++;
+      if (this.currentStage < this.stages.length) {
+        this.loadNextStage();
+      } else {
+        this.onAllLoaded();
+      }
     });
 
-    // ── Tilesets ─────────────────────────────────────────────────────────────
-    const tilesetTypes = ['grass', 'forest', 'stone', 'water'];
-    for (const type of tilesetTypes) {
-      for (let i = 0; i <= 15; i++) {
-        this.load.image(
-          `${type}_wang_${i}`,
-          `assets/tilesets/${type}_wang_${i}.png`,
-        );
-      }
-    }
+    this.load.on('loaderror', (file: Phaser.Loader.File) => {
+      console.error('[BootScene] Asset load error:', file.key, file.src);
+    });
 
-    // ── Characters — idle (directional) ──────────────────────────────────────
-    const characterTypes = ['farmer_male', 'farmer_female'];
+    this.loadNextStage();
+  }
+
+  // ── Staged Loading ──────────────────────────────────────────────────────────
+
+  private buildAssetStages(): void {
     const directions = ['south', 'north', 'east', 'west'];
 
-    for (const char of characterTypes) {
-      // Base / idle sprites
-      this.load.image(char, `assets/characters/${char}.png`);
-      this.load.image(`${char}_idle`, `assets/characters/${char}_idle.png`);
+    // Stage 1: Tilesets (64 files)
+    const tilesets: Array<{ key: string; path: string }> = [];
+    for (const type of ['grass', 'forest', 'stone', 'water']) {
+      for (let i = 0; i <= 15; i++) {
+        tilesets.push({
+          key: `${type}_wang_${i}`,
+          path: `assets/tilesets/${type}_wang_${i}.png`,
+        });
+      }
+    }
+    this.stages.push(tilesets);
 
+    // Stage 2: Character idle sprites (18 files)
+    const charIdles: Array<{ key: string; path: string }> = [];
+    for (const char of ['farmer_male', 'farmer_female']) {
+      charIdles.push({ key: char, path: `assets/characters/${char}.png` });
+      charIdles.push({ key: `${char}_idle`, path: `assets/characters/${char}_idle.png` });
       for (const dir of directions) {
-        // Directional idle
-        this.load.image(
-          `${char}_${dir}`,
-          `assets/characters/${char}_${dir}.png`,
-        );
-        // Walk animation frames f0–f5 (6-frame PixelLab walk cycle)
+        charIdles.push({
+          key: `${char}_${dir}`,
+          path: `assets/characters/${char}_${dir}.png`,
+        });
+      }
+    }
+    // NPC shopkeeper
+    charIdles.push({ key: 'npc_shopkeeper', path: 'assets/characters/npc_shopkeeper.png' });
+    for (const dir of directions) {
+      charIdles.push({
+        key: `npc_shopkeeper_${dir}`,
+        path: `assets/characters/npc_shopkeeper_${dir}.png`,
+      });
+    }
+    this.stages.push(charIdles);
+
+    // Stage 3: Walk animations (48 files)
+    const walkFrames: Array<{ key: string; path: string }> = [];
+    for (const char of ['farmer_male', 'farmer_female']) {
+      for (const dir of directions) {
         for (let f = 0; f <= 5; f++) {
-          this.load.image(
-            `${char}_walk_${dir}_f${f}`,
-            `assets/characters/${char}_walk_${dir}_f${f}.png`,
-          );
+          walkFrames.push({
+            key: `${char}_walk_${dir}_f${f}`,
+            path: `assets/characters/${char}_walk_${dir}_f${f}.png`,
+          });
         }
       }
     }
+    this.stages.push(walkFrames);
 
-    // ── NPC Shopkeeper ────────────────────────────────────────────────────────
-    this.load.image('npc_shopkeeper', 'assets/characters/npc_shopkeeper.png');
-    for (const dir of directions) {
-      this.load.image(
-        `npc_shopkeeper_${dir}`,
-        `assets/characters/npc_shopkeeper_${dir}.png`,
-      );
+    // Stage 4: Objects (27 files)
+    const objects: Array<{ key: string; path: string }> = [];
+    for (const obj of ['oak_tree', 'pine_tree', 'rock_small', 'bush', 'flower_petal', 'wild_carrot']) {
+      objects.push({ key: obj, path: `assets/objects/nature/${obj}.png` });
     }
-
-    // ── Nature Objects ────────────────────────────────────────────────────────
-    const natureObjects = [
-      'oak_tree',
-      'pine_tree',
-      'rock_small',
-      'bush',
-      'flower_petal',
-      'wild_carrot',
-    ];
-    for (const obj of natureObjects) {
-      this.load.image(obj, `assets/objects/nature/${obj}.png`);
+    for (const b of [
+      'workbench', 'bonfire', 'storage_box', 'well', 'fence',
+      'fence_horizontal', 'sawmill', 'furnace', 'scarecrow',
+      'shop_stall', 'npc_shop_stall', 'soil_bed_empty',
+    ]) {
+      objects.push({ key: b, path: `assets/objects/buildings/${b}.png` });
     }
-
-    // ── Building Objects ──────────────────────────────────────────────────────
-    const buildings = [
-      'workbench',
-      'bonfire',
-      'storage_box',
-      'well',
-      'fence',
-      'fence_horizontal',
-      'sawmill',
-      'furnace',
-      'scarecrow',
-      'shop_stall',
-      'npc_shop_stall',
-      'soil_bed_empty',
-    ];
-    for (const b of buildings) {
-      this.load.image(b, `assets/objects/buildings/${b}.png`);
-    }
-
-    // ── Farming Objects ───────────────────────────────────────────────────────
-    const crops = ['wheat', 'carrot'];
-    for (const crop of crops) {
+    for (const crop of ['wheat', 'carrot']) {
       for (let stage = 1; stage <= 4; stage++) {
-        this.load.image(
-          `${crop}_stage${stage}`,
-          `assets/objects/farming/${crop}_stage${stage}.png`,
-        );
+        objects.push({
+          key: `${crop}_stage${stage}`,
+          path: `assets/objects/farming/${crop}_stage${stage}.png`,
+        });
       }
     }
-    this.load.image('soil_bed', 'assets/objects/farming/soil_bed.png');
+    objects.push({ key: 'soil_bed', path: 'assets/objects/farming/soil_bed.png' });
+    this.stages.push(objects);
   }
 
-  create(): void {
+  private loadNextStage(): void {
+    const stage = this.stages[this.currentStage];
+    for (const asset of stage) {
+      this.load.image(asset.key, asset.path);
+    }
+    this.load.start();
+  }
+
+  private updateProgress(): void {
+    const stageProgress = this.load.progress;
+    const stageSize = this.stages[this.currentStage].length;
+    const overallLoaded = this.loadedAssets + stageProgress * stageSize;
+    const pct = overallLoaded / this.totalAssets;
+
+    this.percentText.setText(`${Math.floor(pct * 100)}%`);
+    this.progressBar.clear();
+    this.progressBar.fillStyle(0x4ade80, 1);
+    this.progressBar.fillRect(
+      this.scale.width / 2 - 150 + 5,
+      this.scale.height / 2 - 15,
+      290 * pct,
+      30,
+    );
+  }
+
+  private onAllLoaded(): void {
+    this.progressBar.destroy();
+    this.progressBox.destroy();
+    this.loadingText.destroy();
+    this.percentText.destroy();
     this.scene.start('MenuScene');
   }
 
@@ -139,7 +167,6 @@ export class BootScene extends Phaser.Scene {
     const cx = this.scale.width / 2;
     const cy = this.scale.height / 2;
 
-    // Title
     this.add
       .text(cx, cy - 80, 'PETALAND', {
         fontSize: '32px',
@@ -157,15 +184,12 @@ export class BootScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    // Progress box (background)
     this.progressBox = this.add.graphics();
     this.progressBox.fillStyle(0x1a1a2e, 0.9);
     this.progressBox.fillRect(cx - 155, cy - 20, 310, 40);
 
-    // Progress bar (fill)
     this.progressBar = this.add.graphics();
 
-    // Loading text
     this.loadingText = this.add
       .text(cx, cy + 35, 'Loading assets...', {
         fontSize: '11px',

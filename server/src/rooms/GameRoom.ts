@@ -1,5 +1,6 @@
 import { Room, Client } from "@colyseus/core";
 import { GameState, WorldObjectSchema, BuildingSchema, CropSchema } from "../schema/GameState";
+import { PlotTileSchema, ChatMessageSchema } from "../schema/PlotTileSchema";
 import { PlayerSchema } from "../schema/PlayerSchema";
 import { addToInventory, removeFromInventory, countInventory } from "../schema/InventorySchema";
 import { EnergySystem } from "../game/EnergySystem";
@@ -229,6 +230,39 @@ export class GameRoom extends Room<GameState> {
       if (!player) return;
       addToInventory(player.inventory, message.itemId, message.quantity);
       client.send("debug_give_result", { success: true });
+    });
+
+    // ── Plot tile placement (the doodle octagonal grid) ────────────────────
+    this.onMessage(
+      "place_tile",
+      (
+        client,
+        msg: { cellX: number; cellY: number; assetId: string; tileKind: string },
+      ) => {
+        this.handlePlaceTile(client, msg);
+      },
+    );
+    this.onMessage(
+      "remove_tile",
+      (client, msg: { cellX: number; cellY: number }) => {
+        this.handleRemoveTile(client, msg);
+      },
+    );
+    this.onMessage(
+      "harvest_tile",
+      (client, msg: { cellX: number; cellY: number }) => {
+        this.handleHarvestTile(client, msg);
+      },
+    );
+
+    // ── Chat ───────────────────────────────────────────────────────────────
+    this.onMessage("chat", (client, msg: { text: string; channel?: string }) => {
+      this.handleChat(client, msg);
+    });
+
+    // ── Heartbeat ──────────────────────────────────────────────────────────
+    this.onMessage("ping", (client, msg: { t: number }) => {
+      client.send("pong", { t: msg.t, serverT: Date.now() });
     });
   }
 
@@ -680,12 +714,265 @@ export class GameRoom extends Room<GameState> {
     );
   }
 
+  // ── Plot Tile Handlers (doodle octagonal grid) ────────────────────────────
+
+  /** Per-tileKind metadata: regrow timer + what it yields per harvest */
+  private static readonly TILE_REGROW: Record<
+    string,
+    { regrowMs: number; yields: { item: string; qty: number } } | undefined
+  > = {
+    oak_tree:    { regrowMs: 10 * 60 * 1000, yields: { item: "wood", qty: 3 } },
+    pine_tree:   { regrowMs: 10 * 60 * 1000, yields: { item: "wood", qty: 3 } },
+    wheat_plant: { regrowMs:  3 * 60 * 1000, yields: { item: "wheat", qty: 2 } },
+    carrot_plant:{ regrowMs:  3 * 60 * 1000, yields: { item: "carrot", qty: 2 } },
+    bush:        { regrowMs:  5 * 60 * 1000, yields: { item: "berries", qty: 1 } },
+    // Pure decorations (no regrow)
+    flower_petal:{ regrowMs: 0, yields: { item: "", qty: 0 } },
+    rock_small:  { regrowMs: 0, yields: { item: "", qty: 0 } },
+  };
+
+  private cellKey(ownerId: string, x: number, y: number): string {
+    return `${ownerId}:${x},${y}`;
+  }
+
+  private handlePlaceTile(
+    client: Client,
+    msg: { cellX: number; cellY: number; assetId: string; tileKind: string },
+  ): void {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+
+    const key = this.cellKey(client.sessionId, msg.cellX, msg.cellY);
+
+    // Validate: cell not already occupied (server is authoritative)
+    if (this.state.plotTiles.has(key)) {
+      client.send("action_rejected", {
+        action: "place_tile",
+        reason: `Cell (${msg.cellX},${msg.cellY}) already occupied`,
+      });
+      return;
+    }
+
+    // TODO (production): verify cNFT ownership via Helius DAS API
+    // const owns = await heliusOwns(player.walletAddress, msg.assetId);
+    // if (!owns) { client.send('action_rejected', { reason: 'Not your cNFT' }); return; }
+
+    const meta = GameRoom.TILE_REGROW[msg.tileKind] ?? {
+      regrowMs: 0,
+      yields: { item: "", qty: 0 },
+    };
+
+    const tile = new PlotTileSchema();
+    tile.id = `tile_${client.sessionId}_${msg.cellX}_${msg.cellY}_${Date.now()}`;
+    tile.ownerId = client.sessionId;
+    tile.cellX = msg.cellX;
+    tile.cellY = msg.cellY;
+    tile.tileKind = msg.tileKind;
+    tile.assetId = msg.assetId;
+    tile.placedAt = Date.now();
+    tile.rotation = 0;
+    tile.lastHarvestedAt = 0;
+    tile.regrowMs = meta.regrowMs;
+    tile.ready = meta.regrowMs > 0; // ready immediately if it produces resources
+    tile.yieldsItem = meta.yields.item;
+    tile.yieldsQty = meta.yields.qty;
+
+    this.state.plotTiles.set(key, tile);
+
+    // XP for placement
+    QuestSystem.addXP(player, 5);
+
+    // Broadcast to everyone in the room (so visitors see your changes)
+    this.broadcast("place_tile_confirmed", {
+      key,
+      ownerId: client.sessionId,
+      cellX: msg.cellX,
+      cellY: msg.cellY,
+      tileKind: msg.tileKind,
+      assetId: msg.assetId,
+      placedAt: tile.placedAt,
+      ready: tile.ready,
+    });
+  }
+
+  private handleRemoveTile(
+    client: Client,
+    msg: { cellX: number; cellY: number },
+  ): void {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+
+    const key = this.cellKey(client.sessionId, msg.cellX, msg.cellY);
+    const tile = this.state.plotTiles.get(key);
+    if (!tile) {
+      client.send("action_rejected", {
+        action: "remove_tile",
+        reason: `No tile at (${msg.cellX},${msg.cellY})`,
+      });
+      return;
+    }
+
+    // Only the owner can remove
+    if (tile.ownerId !== client.sessionId) {
+      client.send("action_rejected", {
+        action: "remove_tile",
+        reason: "Not your tile",
+      });
+      return;
+    }
+
+    this.state.plotTiles.delete(key);
+
+    this.broadcast("remove_tile_confirmed", {
+      key,
+      ownerId: client.sessionId,
+      cellX: msg.cellX,
+      cellY: msg.cellY,
+    });
+  }
+
+  private handleHarvestTile(
+    client: Client,
+    msg: { cellX: number; cellY: number },
+  ): void {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+
+    const key = this.cellKey(client.sessionId, msg.cellX, msg.cellY);
+    const tile = this.state.plotTiles.get(key);
+    if (!tile) {
+      client.send("action_rejected", { action: "harvest_tile", reason: "No tile here" });
+      return;
+    }
+    if (tile.ownerId !== client.sessionId) {
+      client.send("action_rejected", { action: "harvest_tile", reason: "Not your tile" });
+      return;
+    }
+    if (!tile.ready) {
+      const remaining = tile.lastHarvestedAt + tile.regrowMs - Date.now();
+      client.send("action_rejected", {
+        action: "harvest_tile",
+        reason: "Not ready",
+        readyInMs: Math.max(0, remaining),
+      });
+      return;
+    }
+    if (!tile.yieldsItem || tile.yieldsQty <= 0) {
+      client.send("action_rejected", { action: "harvest_tile", reason: "Decoration only" });
+      return;
+    }
+
+    // Energy spend
+    if (!EnergySystem.spend(player, "harvest")) {
+      client.send("action_rejected", { action: "harvest_tile", reason: "Out of energy" });
+      return;
+    }
+
+    // Add yield to inventory
+    addToInventory(player.inventory, tile.yieldsItem, tile.yieldsQty);
+
+    // Mark depleted, regrow timer starts now
+    tile.ready = false;
+    tile.lastHarvestedAt = Date.now();
+
+    QuestSystem.addXP(player, 8);
+
+    client.send("harvest_tile_result", {
+      success: true,
+      item: tile.yieldsItem,
+      qty: tile.yieldsQty,
+      cellX: msg.cellX,
+      cellY: msg.cellY,
+      regrowAt: tile.lastHarvestedAt + tile.regrowMs,
+    });
+
+    this.broadcast(
+      "tile_depleted",
+      { key, cellX: msg.cellX, cellY: msg.cellY, regrowAt: tile.lastHarvestedAt + tile.regrowMs },
+      { except: client },
+    );
+  }
+
+  // ── Chat ──────────────────────────────────────────────────────────────────
+
+  private static readonly CHAT_MAX_HISTORY = 50;
+  private static readonly CHAT_MAX_LEN = 200;
+
+  private handleChat(client: Client, msg: { text: string; channel?: string }): void {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+
+    const text = (msg.text ?? "").trim().slice(0, GameRoom.CHAT_MAX_LEN);
+    if (!text) return;
+
+    // Anti-spam: 2 messages per 3 seconds per player
+    const now = Date.now();
+    const lastTime = (player as PlayerSchema & { lastChatAt?: number }).lastChatAt ?? 0;
+    if (now - lastTime < 1500) {
+      client.send("chat_throttled", { retryInMs: 1500 - (now - lastTime) });
+      return;
+    }
+    (player as PlayerSchema & { lastChatAt?: number }).lastChatAt = now;
+
+    const chatMsg = new ChatMessageSchema();
+    chatMsg.id = `chat_${client.sessionId}_${now}`;
+    chatMsg.senderId = client.sessionId;
+    chatMsg.senderName = player.name;
+    chatMsg.text = text;
+    chatMsg.timestamp = now;
+    chatMsg.channel = msg.channel ?? "global";
+
+    this.state.chat.push(chatMsg);
+
+    // Prune old messages
+    while (this.state.chat.length > GameRoom.CHAT_MAX_HISTORY) {
+      this.state.chat.shift();
+    }
+
+    // Broadcast to all
+    this.broadcast("chat_message", {
+      id: chatMsg.id,
+      senderId: chatMsg.senderId,
+      senderName: chatMsg.senderName,
+      text: chatMsg.text,
+      timestamp: chatMsg.timestamp,
+      channel: chatMsg.channel,
+    });
+  }
+
+  // ── Plot tile regrow tick ─────────────────────────────────────────────────
+
+  private checkPlotTileRegrow(): void {
+    const now = Date.now();
+    for (const [key, tile] of this.state.plotTiles) {
+      if (
+        !tile.ready &&
+        tile.regrowMs > 0 &&
+        tile.lastHarvestedAt > 0 &&
+        now >= tile.lastHarvestedAt + tile.regrowMs
+      ) {
+        tile.ready = true;
+        // Notify owner
+        const ownerClient = this.clients.find((c) => c.sessionId === tile.ownerId);
+        if (ownerClient) {
+          ownerClient.send("tile_ready", {
+            key,
+            cellX: tile.cellX,
+            cellY: tile.cellY,
+            tileKind: tile.tileKind,
+          });
+        }
+      }
+    }
+  }
+
   // ── Game Tick ─────────────────────────────────────────────────────────────
 
   private onTick(): void {
     const now = Date.now();
     this.state.tick += 1;
     this.state.serverTime = now;
+    this.checkPlotTileRegrow();
 
     // Check resource respawns
     for (const [, obj] of this.state.worldObjects) {
